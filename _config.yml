@@ -16,6 +16,11 @@ kramdown:
   input: GFM
   hard_wrap: false
   syntax_highlighter: rouge
+  # Renklendirme kapalı: Medium içe aktarıcısı Rouge'un <div class="highlight">
+  # yapısını tanımıyor ve kod bloklarını tamamen düşürüyordu. Düz <pre><code> iki
+  # yerde de çalışıyor.
+  syntax_highlighter_opts:
+    disable: true
 
 plugins:
   - jekyll-seo-tag

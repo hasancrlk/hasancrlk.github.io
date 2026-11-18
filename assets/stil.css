@@ -81,11 +81,10 @@ section > h2 { font-size: 24px; margin: 0 0 8px; letter-spacing: -0.01em; }
 .ust-bilgi a { text-decoration: none; }
 .yazi h1 { font-size: clamp(28px, 5.5vw, 38px); line-height: 1.2; margin: 0 0 14px; letter-spacing: -0.02em; }
 .lede { font-size: 20px; line-height: 1.55; color: var(--soluk); margin: 0 0 24px; }
-.kunye { display: grid; gap: 8px; margin: 0 0 36px; padding: 16px 18px; background: var(--yuzey); border: 1px solid var(--cizgi); border-radius: 12px; font-size: 15px; }
-.kunye div { display: grid; grid-template-columns: 9rem 1fr; gap: 12px; }
-.kunye dt { color: var(--soluk); }
-.kunye dd { margin: 0; overflow-wrap: anywhere; }
-@media (max-width: 480px) { .kunye div { grid-template-columns: 1fr; gap: 0; } }
+.yazi-ust { padding-top: 32px; margin-bottom: 0; }
+.yazi { padding-top: 16px; }
+.kunye { margin: 0 0 36px; padding: 14px 18px; background: var(--yuzey); border: 1px solid var(--cizgi); border-radius: 12px; font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
+.kunye strong { color: var(--soluk); font-weight: 600; }
 .yazi h2 { font-size: 25px; margin: 44px 0 12px; letter-spacing: -0.01em; }
 .yazi h3 { font-size: 19px; margin: 28px 0 8px; }
 .yazi p, .yazi li { overflow-wrap: break-word; }
