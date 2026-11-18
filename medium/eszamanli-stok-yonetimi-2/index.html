@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Elli ürün, üç yüz istek ve tek bir SQL cümlesi | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Elli ürün, üç yüz istek ve tek bir SQL cümlesi" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="Senaryo bir flaş indirim: stokta 50 oyun konsolu var ve kampanya başladığı anda çok sayıda kullanıcı aynı anda satın alma isteği gönderiyor. Sistemden beklenen iki şey var: stoktan fazla satış yapılmaması ve yük altında sistemin kilitlenmemesi." />
+<meta property="og:description" content="Senaryo bir flaş indirim: stokta 50 oyun konsolu var ve kampanya başladığı anda çok sayıda kullanıcı aynı anda satın alma isteği gönderiyor. Sistemden beklenen iki şey var: stoktan fazla satış yapılmaması ve yük altında sistemin kilitlenmemesi." />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/eszamanli-stok-yonetimi-2/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/eszamanli-stok-yonetimi-2/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-08-31T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Elli ürün, üç yüz istek ve tek bir SQL cümlesi" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/stok.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Elli ürün, üç yüz istek ve tek bir SQL cümlesi</h1>
+  <p class="lede">Stokta 50 ürün varken aynı anda 300 satın alma isteği gelirse ne olur? Bu servis, sorunun cevabını tek bir atomik SQL cümlesiyle veriyor ve bir eşzamanlılık testiyle kanıtlıyor.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · FastAPI · SQLAlchemy async · asyncpg · PostgreSQL · pytest<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/Es_Zamanlilik_Stok_Yonetimi">github.com/hasancrlk/Es_Zamanlilik_Stok_Yonetimi</a>
+  </p>
+
+  <p>Senaryo bir flaş indirim: stokta 50 oyun konsolu var ve kampanya başladığı
+anda çok sayıda kullanıcı aynı anda satın alma isteği gönderiyor. Sistemden
+beklenen iki şey var: stoktan fazla satış yapılmaması ve yük altında
+sistemin kilitlenmemesi.</p>
+
+<p>Bu proje EMT Cyber stajında verilen ödevlerin ilkiydi.</p>
+
+<h2 id="sorunun-kaynağı">Sorunun kaynağı</h2>
+
+<p>İlk akla gelen yöntem stoğu okuyup kontrol etmek, sonra azaltmak:</p>
+
+<pre>urun = await db.get(Item, item_id)<br>if urun.stock &gt;= adet:<br>&nbsp;&nbsp;&nbsp;&nbsp;urun.stock -= adet</pre>
+
+<p>Tek bir istek için bu kod doğru çalışır. İki istek ilk satırı aynı anda
+çalıştırırsa ikisi de aynı stok değerini okur ve ikisi de satışı tamamlar.
+Bu duruma <strong>kayıp güncelleme</strong> (lost update) denir ve sonuç eksi stoktur. Hata
+yalnızca eşzamanlı isteklerde ortaya çıktığı için tek tek yapılan denemelerde
+görünmez.</p>
+
+<h2 id="çözüm">Çözüm</h2>
+
+<p>Kontrol ve azaltma tek bir SQL cümlesinde birleştirildi:</p>
+
+<pre>result = await db.execute(<br>&nbsp;&nbsp;&nbsp;&nbsp;update(Item)<br>&nbsp;&nbsp;&nbsp;&nbsp;.where(Item.id == item_id, Item.stock &gt;= body.quantity)<br>&nbsp;&nbsp;&nbsp;&nbsp;.values(stock=Item.stock - body.quantity)<br>&nbsp;&nbsp;&nbsp;&nbsp;.returning(Item.stock)<br>)<br>new_stock = result.scalar_one_or_none()</pre>
+
+<p>PostgreSQL bu cümleyi çalıştırırken ilgili satıra satır kilidi koyar. Aynı
+satıra gelen diğer istekler ilk işlem tamamlanana kadar bekler ve sıra
+kendilerine geldiğinde <code>stock &gt;= adet</code> koşulunu güncel değer üzerinden yeniden
+değerlendirir. Stok yetersizse hiçbir satır güncellenmez. Bu durumda servis
+ürünün var olup olmadığına bakıp <code>404</code> ya da <code>409</code> döner.</p>
+
+<p>Bu yaklaşımla ek bir <code>SELECT ... FOR UPDATE</code> sorgusuna, uygulama tarafında
+kilide ya da yeniden deneme döngüsüne ihtiyaç kalmıyor.</p>
+
+<p>Ayrıca tabloda <code>CHECK (stock &gt;= 0)</code> kısıtı tanımlı. Kod ileride yanlışlıkla
+değiştirilse bile veritabanı eksi stoğu kabul etmiyor.</p>
+
+<h2 id="doğrulama">Doğrulama</h2>
+
+<p>Bu davranış ancak eşzamanlı istek gönderen bir testle doğrulanabilir; tek tek
+gönderilen isteklerle yazılmış bir test her koşulda geçer:</p>
+
+<pre>async def test_concurrent_purchases_never_go_negative(client):<br>&nbsp;&nbsp;&nbsp;&nbsp;stock = 50<br>&nbsp;&nbsp;&nbsp;&nbsp;concurrent_requests = 300<br>&nbsp;&nbsp;&nbsp;&nbsp;item_id = await _create_item(stock=stock)<br><br>&nbsp;&nbsp;&nbsp;&nbsp;responses = await asyncio.gather(<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;*[client.post(f"/purchase/{item_id}") for _ in range(concurrent_requests)]<br>&nbsp;&nbsp;&nbsp;&nbsp;)<br>&nbsp;&nbsp;&nbsp;&nbsp;status_codes = [r.status_code for r in responses]<br><br>&nbsp;&nbsp;&nbsp;&nbsp;assert status_codes.count(201) == stock<br>&nbsp;&nbsp;&nbsp;&nbsp;assert status_codes.count(409) == concurrent_requests - stock</pre>
+
+<p>Test 300 isteği aynı anda gönderiyor. Beklenen sonuç tam 50 başarılı satış
+(<code>201</code>), 250 reddedilen istek (<code>409</code>) ve veritabanında 0 stok. Test gerçek bir
+PostgreSQL üzerinde çalışıyor; satır kilidi davranışı SQLite ile
+sınanamadığı için bu bilinçli bir tercih.</p>
+
+<h2 id="asenkron-yapı">Asenkron yapı</h2>
+
+<p>Bu iş yükünde zamanın büyük bölümü veritabanı cevabını beklemekle geçiyor.
+Senkron bir yapıda bekleyen her istek bir iş parçacığını meşgul eder ve havuz
+kısa sürede dolar. Async SQLAlchemy ve asyncpg ile tek bir olay döngüsü, bir
+istek beklerken diğerlerini işlemeye devam ediyor. Kısa süreli ani yük
+senaryoları için uygun model bu.</p>
+
+<h2 id="kapsam">Kapsam</h2>
+
+<p>Proje yalnızca eşzamanlılık sorununa odaklanıyor. Kimlik doğrulama ve ödeme
+adımı yok; gerçek bir sistemde stok önce rezerve edilir, ödeme tamamlanmazsa
+serbest bırakılır. Tablolar uygulama açılışında oluşturuluyor; şema
+değişiklikleri için Alembic gibi bir migration aracı eklenmesi gerekir.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/eszamanli-stok-yonetimi/">https://hasancrlk.github.io/projeler/eszamanli-stok-yonetimi/</a></p>
+</main>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Fifty items, three hundred requests and a single SQL statement | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Fifty items, three hundred requests and a single SQL statement" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="en" />
+<meta name="description" content="The scenario is a flash sale: 50 game consoles are in stock, and the moment the campaign starts, many users send purchase requests at the same time. Two things are expected of the system: no overselling, and no lock-up under load." />
+<meta property="og:description" content="The scenario is a flash sale: 50 game consoles are in stock, and the moment the campaign starts, many users send purchase requests at the same time. Two things are expected of the system: no overselling, and no lock-up under load." />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/en-concurrent-inventory-2/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/en-concurrent-inventory-2/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-08-31T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Fifty items, three hundred requests and a single SQL statement" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/stok.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Fifty items, three hundred requests and a single SQL statement</h1>
+  <p class="lede">What happens when 300 purchase requests arrive at once and only 50 items are in stock? This service answers with a single atomic SQL statement and proves it with a concurrency test.</p>
+
+  <p class="kunye">
+    <strong>Tech stack:</strong> Python · FastAPI · SQLAlchemy async · asyncpg · PostgreSQL · pytest<br>
+    <strong>Source code:</strong> <a href="https://github.com/hasancrlk/Es_Zamanlilik_Stok_Yonetimi">github.com/hasancrlk/Es_Zamanlilik_Stok_Yonetimi</a>
+  </p>
+
+  <p>The scenario is a flash sale: 50 game consoles are in stock, and the moment
+the campaign starts, many users send purchase requests at the same time. Two
+things are expected of the system: no overselling, and no lock-up under load.</p>
+
+<p>This was the first of the assignments given during my internship at EMT Cyber.</p>
+
+<h2 id="where-the-problem-comes-from">Where the problem comes from</h2>
+
+<p>The first approach that comes to mind is to read the stock, check it, then
+decrement it:</p>
+
+<pre>item = await db.get(Item, item_id)<br>if item.stock &gt;= qty:<br>&nbsp;&nbsp;&nbsp;&nbsp;item.stock -= qty</pre>
+
+<p>For a single request this code is correct. If two requests run the first line
+at the same time, both read the same stock value and both complete the sale.
+This is a <strong>lost update</strong>, and the result is negative stock. Because the bug
+only appears with concurrent requests, it does not show up when testing one
+request at a time.</p>
+
+<h2 id="the-fix">The fix</h2>
+
+<p>The check and the decrement were merged into one SQL statement:</p>
+
+<pre>result = await db.execute(<br>&nbsp;&nbsp;&nbsp;&nbsp;update(Item)<br>&nbsp;&nbsp;&nbsp;&nbsp;.where(Item.id == item_id, Item.stock &gt;= body.quantity)<br>&nbsp;&nbsp;&nbsp;&nbsp;.values(stock=Item.stock - body.quantity)<br>&nbsp;&nbsp;&nbsp;&nbsp;.returning(Item.stock)<br>)<br>new_stock = result.scalar_one_or_none()</pre>
+
+<p>When PostgreSQL executes this statement it puts a row lock on the row. Other
+requests for the same row wait until the first transaction completes, and
+when their turn comes they re-evaluate <code>stock &gt;= qty</code> against the current
+value. If there is not enough stock, no row is updated, and the service checks
+whether the product exists to return <code>404</code> or <code>409</code>.</p>
+
+<p>With this approach there is no need for an extra <code>SELECT ... FOR UPDATE</code>, an
+application-level lock or a retry loop.</p>
+
+<p>The table also has a <code>CHECK (stock &gt;= 0)</code> constraint. Even if the code is
+changed by mistake later, the database will not accept negative stock.</p>
+
+<h2 id="verification">Verification</h2>
+
+<p>This behaviour can only be verified with a test that sends concurrent
+requests; a test that sends them one by one passes in every case:</p>
+
+<pre>async def test_concurrent_purchases_never_go_negative(client):<br>&nbsp;&nbsp;&nbsp;&nbsp;stock = 50<br>&nbsp;&nbsp;&nbsp;&nbsp;concurrent_requests = 300<br>&nbsp;&nbsp;&nbsp;&nbsp;item_id = await _create_item(stock=stock)<br><br>&nbsp;&nbsp;&nbsp;&nbsp;responses = await asyncio.gather(<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;*[client.post(f"/purchase/{item_id}") for _ in range(concurrent_requests)]<br>&nbsp;&nbsp;&nbsp;&nbsp;)<br>&nbsp;&nbsp;&nbsp;&nbsp;status_codes = [r.status_code for r in responses]<br><br>&nbsp;&nbsp;&nbsp;&nbsp;assert status_codes.count(201) == stock<br>&nbsp;&nbsp;&nbsp;&nbsp;assert status_codes.count(409) == concurrent_requests - stock</pre>
+
+<p>The test sends 300 requests at once. The expected result is exactly 50
+successful sales (<code>201</code>), 250 rejected requests (<code>409</code>) and 0 stock in the
+database. The test runs against a real PostgreSQL instance; row-lock
+behaviour can’t be tested with SQLite, so this is a deliberate choice.</p>
+
+<h2 id="the-asynchronous-design">The asynchronous design</h2>
+
+<p>In this workload most of the time is spent waiting for the database. In a
+synchronous design each waiting request occupies a worker thread and the pool
+fills quickly. With async SQLAlchemy and asyncpg, a single event loop keeps
+serving other requests while one waits. That is the right model for short,
+sudden load.</p>
+
+<h2 id="scope">Scope</h2>
+
+<p>The project focuses only on the concurrency problem. There is no
+authentication and no payment step; in a real system stock is first reserved
+and released if payment does not complete. Tables are created at startup;
+schema changes would need a migration tool such as Alembic.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/en/projects/concurrent-inventory/">https://hasancrlk.github.io/en/projects/concurrent-inventory/</a></p>
+</main>
+</body>
+</html>

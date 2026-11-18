@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Scoring security headers by their values | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Scoring security headers by their values" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="en" />
+<meta name="description" content="The following line is a valid HTTP response header:" />
+<meta property="og:description" content="The following line is a valid HTTP response header:" />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/en-security-header-scanner-2/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/en-security-header-scanner-2/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-18T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Scoring security headers by their values" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/headerguard.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Scoring security headers by their values</h1>
+  <p class="lede">A scanner that inspects a website's HTTP security headers and gives it a 0–100 score and an A–F grade. It checks not only whether a header exists but whether its value actually provides protection.</p>
+
+  <p class="kunye">
+    <strong>Tech stack:</strong> Python · httpx · FastAPI · SQLAlchemy · PostgreSQL · Docker<br>
+    <strong>Source code:</strong> <a href="https://github.com/hasancrlk/http-guvenlik-basligi-tarayici">github.com/hasancrlk/http-guvenlik-basligi-tarayici</a>
+  </p>
+
+  <p>The following line is a valid HTTP response header:</p>
+
+<pre>Strict-Transport-Security: max-age=1</pre>
+
+<p>Because the header is present, a check that only looks at presence treats the
+site as compliant. But <code>max-age=1</code> tells the browser to remember the rule for
+one second. HeaderGuard was written to tell such cases apart.</p>
+
+<h2 id="scoring">Scoring</h2>
+
+<p>Each header has a weight and a set of sub-checks. Every failed check lowers
+the header’s score ratio. The total is the weighted average of the ratios,
+minus penalty points.</p>
+
+<p>The highest weights follow each header’s role in protection:</p>
+
+<ul>
+  <li><strong>Content-Security-Policy (22):</strong> the strongest header for limiting XSS.</li>
+  <li><strong>Strict-Transport-Security (18):</strong> blocks HTTPS-to-HTTP downgrade attacks.</li>
+  <li><strong>X-Frame-Options (10):</strong> prevents the page from being framed by another
+site, i.e. clickjacking.</li>
+  <li><strong>X-Content-Type-Options and Referrer-Policy (8 each):</strong> MIME sniffing and
+address leakage.</li>
+</ul>
+
+<p>Some examples:</p>
+
+<ul>
+  <li><code>max-age=31536000; includeSubDomains</code> → HSTS gets full marks.</li>
+  <li><code>max-age=31536000</code> → ratio 0.80, subdomains stay unprotected.</li>
+  <li><code>max-age=60</code> → ratio 0.50, shorter than six months.</li>
+  <li>A CSP containing <code>script-src 'unsafe-inline'</code> → ratio 0.60.</li>
+</ul>
+
+<p>Headers such as a version-revealing <code>Server: nginx/1.24.0</code>, <code>X-Powered-By</code>
+and <code>Access-Control-Allow-Origin: *</code> cost penalty points.</p>
+
+<p>Two cases are handled specially. On a site served over plain HTTP, a missing
+HSTS header is not penalised separately; the real issue is the use of HTTP
+itself, reported as its own high-severity finding. If the CSP defines
+<code>frame-ancestors</code>, a missing <code>X-Frame-Options</code> costs nothing, because that is
+the modern configuration.</p>
+
+<h2 id="rules-live-in-a-file-not-in-code">Rules live in a file, not in code</h2>
+
+<p>Scoring rules are kept in <code>data/rules.json</code>. An organisation can define its
+own policy without changing the code:</p>
+
+<pre>{<br>&nbsp;&nbsp;"name": "strict-transport-security",<br>&nbsp;&nbsp;"weight": 18,<br>&nbsp;&nbsp;"advice": "Strict-Transport-Security: max-age=31536000; includeSubDomains",<br>&nbsp;&nbsp;"checks": [<br>&nbsp;&nbsp;&nbsp;&nbsp;{ "type": "directive_min", "directive": "max-age", "min": 15768000, "penalty": 0.5 },<br>&nbsp;&nbsp;&nbsp;&nbsp;{ "type": "must_contain", "value": "includesubdomains", "penalty": 0.2 }<br>&nbsp;&nbsp;]<br>}</pre>
+
+<p>A configurable file must not give whoever can edit it a way to run code.
+Check types therefore come from a fixed set, and an unknown type stops the
+file from loading. Regular expressions are compiled at startup, and there is
+no <code>eval</code> path. The active rules can be read from <code>GET /rules</code>, so the way a
+grade was calculated is always visible.</p>
+
+<h2 id="redirects">Redirects</h2>
+
+<p>Redirects are followed by hand rather than left to <code>httpx</code>. With automatic
+following, only the last response’s headers are visible, while the chain
+itself can be a finding. A chain that starts at <code>https://</code> and ends at
+<code>http://</code> is reported as a high-severity <strong>protocol downgrade</strong>. More than 10
+redirects are treated as a loop.</p>
+
+<p>An unreachable target does not stop the whole scan; each target is evaluated
+separately and appears in the result with its error type.</p>
+
+<h2 id="cookies-tls-and-comparison">Cookies, TLS and comparison</h2>
+
+<p>Cookies are checked for <code>Secure</code>, <code>HttpOnly</code> and <code>SameSite</code>. The TLS
+certificate’s subject, issuer and days until expiry are reported. When two
+scans are compared, only targets present in both are considered, so removing
+a target from the list cannot raise the average and look like an
+improvement.</p>
+
+<h2 id="limits">Limits</h2>
+
+<p>Only the site’s root page is scanned and JavaScript is not executed, so a CSP
+set via a <code>&lt;meta&gt;</code> tag is not seen. CSP analysis catches obvious weaknesses
+such as <code>unsafe-inline</code> and <code>default-src *</code> but does not evaluate nonce and
+hash strategies. A high grade does not mean the site is secure; headers are
+only one layer of defence.</p>
+
+<p>The project ships with 53 tests.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/en/projects/security-header-scanner/">https://hasancrlk.github.io/en/projects/security-header-scanner/</a></p>
+</main>
+</body>
+</html>

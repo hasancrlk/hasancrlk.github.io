@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Güvenlik başlıklarını değerleriyle puanlamak | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Güvenlik başlıklarını değerleriyle puanlamak" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="Aşağıdaki satır geçerli bir HTTP yanıt başlığıdır:" />
+<meta property="og:description" content="Aşağıdaki satır geçerli bir HTTP yanıt başlığıdır:" />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/http-guvenlik-basligi-tarayici-2/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/http-guvenlik-basligi-tarayici-2/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-18T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Güvenlik başlıklarını değerleriyle puanlamak" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/headerguard.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Güvenlik başlıklarını değerleriyle puanlamak</h1>
+  <p class="lede">Web sitelerinin HTTP güvenlik başlıklarını inceleyip 0–100 arası puan ve A–F arası not veren bir tarayıcı. Başlığın yalnızca var olup olmadığına değil, değerinin gerçekten koruma sağlayıp sağlamadığına bakıyor.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · httpx · FastAPI · SQLAlchemy · PostgreSQL · Docker<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/http-guvenlik-basligi-tarayici">github.com/hasancrlk/http-guvenlik-basligi-tarayici</a>
+  </p>
+
+  <p>Aşağıdaki satır geçerli bir HTTP yanıt başlığıdır:</p>
+
+<pre>Strict-Transport-Security: max-age=1</pre>
+
+<p>Başlık mevcut olduğu için yalnızca varlığına bakan bir kontrol bu siteyi
+başarılı sayar. Oysa <code>max-age=1</code>, tarayıcıya bu kuralı yalnızca bir saniye
+hatırlamasını söyler. HeaderGuard bu tür durumları ayırt etmek için yazıldı.</p>
+
+<h2 id="puanlama">Puanlama</h2>
+
+<p>Her başlık için bir ağırlık ve bir dizi alt kontrol tanımlı. Başarısız olan
+her kontrol başlığın puan oranını düşürüyor. Toplam puan, oranların ağırlıklı
+ortalamasından ve ceza puanlarından oluşuyor.</p>
+
+<p>En yüksek ağırlıklar, korumadaki rollerine göre belirlendi:</p>
+
+<ul>
+  <li><strong>Content-Security-Policy (22):</strong> XSS etkisini sınırlayan en güçlü başlık.</li>
+  <li><strong>Strict-Transport-Security (18):</strong> HTTPS’ten HTTP’ye düşürme saldırılarını
+engeller.</li>
+  <li><strong>X-Frame-Options (10):</strong> Sayfanın başka bir sitede çerçeve içine
+alınmasını, yani clickjacking’i engeller.</li>
+  <li><strong>X-Content-Type-Options ve Referrer-Policy (8’er):</strong> MIME tahmini ve
+adres sızıntısı.</li>
+</ul>
+
+<p>Bazı örnekler:</p>
+
+<ul>
+  <li><code>max-age=31536000; includeSubDomains</code> → HSTS tam puan alır.</li>
+  <li><code>max-age=31536000</code> → alt alan adları korumasız kaldığı için oran 0,80.</li>
+  <li><code>max-age=60</code> → süre altı aydan kısa olduğu için oran 0,50.</li>
+  <li><code>script-src 'unsafe-inline'</code> içeren bir CSP → oran 0,60.</li>
+</ul>
+
+<p>Sürüm bilgisi veren <code>Server: nginx/1.24.0</code>, <code>X-Powered-By</code> ve
+<code>Access-Control-Allow-Origin: *</code> gibi başlıklar ise ceza puanı alıyor.</p>
+
+<p>İki durum özel olarak ele alındı. Düz HTTP üzerinden sunulan bir sitede HSTS
+eksikliği ayrıca cezalandırılmıyor; asıl sorun HTTP kullanımının kendisi ve o
+ayrı bir yüksek önemli bulgu olarak raporlanıyor. CSP’de <code>frame-ancestors</code>
+tanımlıysa <code>X-Frame-Options</code> eksikliği puan kaybettirmiyor, çünkü modern
+yapılandırma bu.</p>
+
+<h2 id="kurallar-kodda-değil-dosyada">Kurallar kodda değil, dosyada</h2>
+
+<p>Puanlama kuralları <code>data/rules.json</code> dosyasında tutuluyor. Bir kurum kendi
+politikasını kod değiştirmeden tanımlayabiliyor:</p>
+
+<pre>{<br>&nbsp;&nbsp;"name": "strict-transport-security",<br>&nbsp;&nbsp;"weight": 18,<br>&nbsp;&nbsp;"advice": "Strict-Transport-Security: max-age=31536000; includeSubDomains",<br>&nbsp;&nbsp;"checks": [<br>&nbsp;&nbsp;&nbsp;&nbsp;{ "type": "directive_min", "directive": "max-age", "min": 15768000, "penalty": 0.5 },<br>&nbsp;&nbsp;&nbsp;&nbsp;{ "type": "must_contain", "value": "includesubdomains", "penalty": 0.2 }<br>&nbsp;&nbsp;]<br>}</pre>
+
+<p>Yapılandırılabilir bir dosyanın, onu değiştirebilen birine kod çalıştırma
+imkânı vermemesi gerekiyor. Bu nedenle kontrol tipleri sabit bir kümeden
+seçiliyor ve tanınmayan bir tip dosyanın yüklenmesini durduruyor. Düzenli
+ifadeler uygulama açılırken derleniyor; herhangi bir <code>eval</code> yolu bulunmuyor.
+Yürürlükteki kurallar <code>GET /rules</code> ucundan okunabiliyor, böylece verilen
+notun nasıl hesaplandığı her zaman görülebiliyor.</p>
+
+<h2 id="yönlendirmeler">Yönlendirmeler</h2>
+
+<p>Yönlendirmeler <code>httpx</code>‘in otomatik takibine bırakılmadı, elle izleniyor.
+Otomatik takipte yalnızca son yanıtın başlıkları görülür; oysa zincirin
+kendisi bir bulgu olabilir. <code>https://</code> ile başlayıp <code>http://</code> ile biten bir
+zincir <strong>protokol düşürme</strong> olarak yüksek önemle raporlanıyor. 10’dan fazla
+yönlendirme döngü olarak kabul ediliyor.</p>
+
+<p>Erişilemeyen bir hedef taramanın tamamını durdurmuyor; her hedef ayrı
+değerlendiriliyor ve sonuçta hata türüyle görünüyor.</p>
+
+<h2 id="çerezler-tls-ve-karşılaştırma">Çerezler, TLS ve karşılaştırma</h2>
+
+<p>Çerezlerde <code>Secure</code>, <code>HttpOnly</code> ve <code>SameSite</code> bayrakları kontrol ediliyor.
+TLS sertifikasının sahibi, yayıncısı ve bitmesine kalan gün sayısı
+raporlanıyor. İki tarama karşılaştırılırken yalnızca her iki taramada da
+bulunan hedefler hesaba katılıyor; listeden çıkarılan bir hedefin ortalamayı
+yükseltip iyileşme gibi görünmesi bu şekilde önleniyor.</p>
+
+<h2 id="sınırlar">Sınırlar</h2>
+
+<p>Yalnızca sitenin kök sayfası taranıyor ve JavaScript çalıştırılmıyor; bu
+nedenle <code>&lt;meta&gt;</code> etiketiyle verilen CSP görülmüyor. CSP analizi <code>unsafe-inline</code>
+ve <code>default-src *</code> gibi açık zayıflıkları yakalıyor, nonce ve hash
+stratejilerini değerlendirmiyor. Yüksek bir not sitenin güvenli olduğu
+anlamına gelmiyor; başlıklar savunmanın yalnızca bir katmanı.</p>
+
+<p>Proje 53 testle birlikte geliyor.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/http-guvenlik-basligi-tarayici/">https://hasancrlk.github.io/projeler/http-guvenlik-basligi-tarayici/</a></p>
+</main>
+</body>
+</html>

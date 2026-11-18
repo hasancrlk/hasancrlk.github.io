@@ -22,6 +22,9 @@ import urllib.request
 
 KOK = pathlib.Path(__file__).resolve().parent.parent
 SITE = "https://hasancrlk.github.io"
+# Medium bir adresi bir kez okuyup önbelleğe alıyor. Kopya yeniden üretilip yeniden
+# aktarılacaksa sürümü artır: adresler /medium/<ad>-<SURUM>/ olur.
+SURUM = "2"
 
 PRE = re.compile(r"<pre><code(?: class=\"[^\"]*\")?>(.*?)</code></pre>", re.S)
 
@@ -30,8 +33,9 @@ def pre_donustur(m: re.Match[str]) -> str:
     satirlar = m.group(1).rstrip("\n").split("\n")
     cikti = []
     for s in satirlar:
-        bosluk = len(s) - len(s.lstrip(" "))
-        cikti.append("&nbsp;" * bosluk + s[bosluk:])
+        # Satır başı girintisi ve sütun hizası için iki ve daha fazla boşluk korunur.
+        s = re.sub(r"^ +| {2,}", lambda b: "&nbsp;" * len(b.group()), s)
+        cikti.append(s)
     return "<pre>" + "<br>".join(cikti) + "</pre>"
 
 
@@ -64,7 +68,7 @@ def kopya_uret(yol: str, hedef: pathlib.Path) -> None:
 def main() -> None:
     for klasor, onek, url_on in (("_projeler", "", "/projeler/"), ("_projects", "en-", "/en/projects/")):
         for md in sorted((KOK / klasor).glob("*.md")):
-            kopya_uret(f"{url_on}{md.stem}/", KOK / "medium" / f"{onek}{md.stem}")
+            kopya_uret(f"{url_on}{md.stem}/", KOK / "medium" / f"{onek}{md.stem}-{SURUM}")
 
 
 if __name__ == "__main__":
