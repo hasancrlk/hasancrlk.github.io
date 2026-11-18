@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Alt alan adı keşfinde hız sınırı ve wildcard DNS | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Alt alan adı keşfinde hız sınırı ve wildcard DNS" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="Bir kurumun ana alan adının altında zamanla admin., vpn., test., api. gibi onlarca alt alan adı birikir. Bir kısmı unutulur ve güncellenmeyen sunucular erişilebilir kalır. Bug bounty programlarında da, CTF’lerde de keşfin ilk adımı genellikle bu adları bulmaktır; ben de bu iki alanla ilgileniyorum." />
+<meta property="og:description" content="Bir kurumun ana alan adının altında zamanla admin., vpn., test., api. gibi onlarca alt alan adı birikir. Bir kısmı unutulur ve güncellenmeyen sunucular erişilebilir kalır. Bug bounty programlarında da, CTF’lerde de keşfin ilk adımı genellikle bu adları bulmaktır; ben de bu iki alanla ilgileniyorum." />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/alt-alan-adi-kesif-araci-4/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/alt-alan-adi-kesif-araci-4/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-18T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Alt alan adı keşfinde hız sınırı ve wildcard DNS" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/subhound.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Alt alan adı keşfinde hız sınırı ve wildcard DNS</h1>
+  <p class="lede">Wildcard DNS'i Bilgisayar Ağları dersinde bir yapılandırma ayrıntısı olarak öğrenmiştim. Bir keşif aracı yazınca, aynı ayrıntının bütün sonuçları çöpe çevirebildiğini gördüm.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · asyncio · dnspython · FastAPI · SQLAlchemy · Docker<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/alt-alan-adi-kesif-araci">github.com/hasancrlk/alt-alan-adi-kesif-araci</a>
+  </p>
+
+  <p>Bir kurumun ana alan adının altında zamanla <code>admin.</code>, <code>vpn.</code>, <code>test.</code>, <code>api.</code>
+gibi onlarca alt alan adı birikir. Bir kısmı unutulur ve güncellenmeyen
+sunucular erişilebilir kalır. Bug bounty programlarında da, CTF’lerde de
+keşfin ilk adımı genellikle bu adları bulmaktır; ben de bu iki alanla
+ilgileniyorum.</p>
+
+<p>Araç, içine gömdüğüm 300’den fazla yaygın etiketi <code>&lt;etiket&gt;.alanadi.com</code>
+hâline getirip A, AAAA ve CNAME kayıtlarını soruyor:</p>
+
+<pre>$ python -m cli enumerate example.com<br>Denenen&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: 315<br>Bulunan&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: 4 aktif (12 wildcard elendi)<br>&nbsp;&nbsp;&nbsp;api.example.com&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;A&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;93.184.216.35<br>*&nbsp;&nbsp;admin.example.com&nbsp;&nbsp;&nbsp;&nbsp;A&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;93.184.216.36<br>&nbsp;&nbsp;&nbsp;mail.example.com&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CNAME&nbsp;&nbsp;&nbsp;ghs.googlehosted.com<br>&nbsp;&nbsp;&nbsp;www.example.com&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;A&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;93.184.216.34</pre>
+
+<h2 id="hızlı-olmak-neden-yanlış-sonuç-verebilir">Hızlı olmak neden yanlış sonuç verebilir?</h2>
+
+<p>Binlerce sorguyu hızlı yürütmek için <code>asyncio</code> kullandım. Burada iki ayrı
+ayar var ve ikisini birbirine karıştırmamak gerekiyor:</p>
+
+<ul>
+  <li><strong>Eşzamanlılık:</strong> Aynı anda kaç sorgunun beklemede olacağı. Bunu
+<code>asyncio.Semaphore</code> ile 50’de tuttum.</li>
+  <li><strong>Hız:</strong> Saniyede kaç sorgu gönderileceği. Bunu token bucket ile saniyede
+100’e sınırladım.</li>
+</ul>
+
+<p>Sadece eşzamanlılığı sınırlamak yetmiyor. 50 sorgunun her biri birkaç
+milisaniye sürerse saniyede binlerce sorgu gider. Açık DNS
+çözümleyicilerinin çoğu bu hızda sizi kısıtlıyor, üstelik bunu hata vererek
+değil <code>SERVFAIL</code> ya da <code>REFUSED</code> döndürerek yapıyor. Kodda bu cevaplar “kayıt
+yok” ile aynı görünüyor. Sonuçta tarama hatasız bitiyor ama liste eksik
+çıkıyor. Hata vermeden eksik sonuç veren bir araç, hata veren bir araçtan çok
+daha tehlikelidir.</p>
+
+<p>Token bucket’ı sabit aralıklı beklemeye tercih ettim çünkü kısa ani yüklere
+izin verirken uzun vadede ortalamayı koruyor. Beklemeyi kilidin dışında
+yapıyorum; böylece yavaş bir görev bütün kuyruğu durdurmuyor.</p>
+
+<pre>self._tokens = min(capacity, self._tokens + gecen_sure * rate)</pre>
+
+<h2 id="her-isme-cevap-veren-alan-adları">Her isme cevap veren alan adları</h2>
+
+<p>Bir alan adı <code>*.example.com</code> için kayıt tanımlamışsa, var olmayan her isim de
+cevap döner. Bunu fark etmeyen bir araç listedeki her kelime için “bulundu”
+der.</p>
+
+<p>Bu yüzden taramaya başlamadan önce rastgele üç isim soruyorum
+(<code>subhound-&lt;16 hex&gt;.example.com</code>). Üçü de cevap veriyorsa alanda wildcard
+olduğunu kabul edip dönen IP kümesini kaydediyorum. Taramada IP kümesi bu
+kümeyle <strong>birebir</strong> aynı olan sonuçları wildcard olarak işaretliyorum.</p>
+
+<p>Kısmi değil birebir eşleşme kullanmamın sebebi şu: gerçek bir alt alan adı da
+wildcard ile aynı sunucuda duruyor olabilir. Elenen sonuçları silmiyorum,
+<code>is_wildcard</code> olarak işaretliyorum; <code>--show-wildcard</code> ile görebiliyorsunuz.</p>
+
+<h2 id="yeni-çıkanı-fark-etmek">Yeni çıkanı fark etmek</h2>
+
+<p>Aynı alan adını tekrar taradığınızda, önceki taramada olmayan alt alan
+adları <code>*</code> ile işaretleniyor. Düzenli çalıştırırsanız yeni açılan bir sunucuyu
+ilk gün fark edersiniz.</p>
+
+<h2 id="kapsam-ve-sınırlar">Kapsam ve sınırlar</h2>
+
+<p>Keşfi yalnızca size ait ya da test izni verilmiş alan adlarında yapmalısınız.
+Aracın varsayılan olarak hız sınırlı çalışmasının bir sebebi de bu.</p>
+
+<p>Gerçek bir keşifte Certificate Transparency kayıtları ve pasif DNS kaynakları
+kelime listesinden daha verimli; bunları eklemedim. Zone transfer (<code>AXFR</code>)
+denemesini ise izin sınırına yakın olduğu için bilerek dışarıda bıraktım. Alt
+alan devralma kontrolü ve Türkçe karakterli alan adları için punycode
+dönüşümü de yok.</p>
+
+<p>Proje 42 testle geliyor; komut satırı ve REST API aynı motoru kullanıyor.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/alt-alan-adi-kesif-araci/">https://hasancrlk.github.io/projeler/alt-alan-adi-kesif-araci/</a></p>
+</main>
+</body>
+</html>

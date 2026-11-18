@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Bir giriş logundan kaba kuvvet saldırısını ayıklamak | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Bir giriş logundan kaba kuvvet saldırısını ayıklamak" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="Bu proje EMT Cyber stajında verilen ödevlerden biriydi: SSH ve web sunucularının giriş loglarını okuyup kaba kuvvet (brute-force) saldırılarını tespit etmek. İşin kolay kısmı saldırıyı bulmak. Zor kısmı, bulduğunuz şeyin gerçekten saldırı olup olmadığına karar vermek." />
+<meta property="og:description" content="Bu proje EMT Cyber stajında verilen ödevlerden biriydi: SSH ve web sunucularının giriş loglarını okuyup kaba kuvvet (brute-force) saldırılarını tespit etmek. İşin kolay kısmı saldırıyı bulmak. Zor kısmı, bulduğunuz şeyin gerçekten saldırı olup olmadığına karar vermek." />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/kaba-kuvvet-saldiri-tespiti-4/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/kaba-kuvvet-saldiri-tespiti-4/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-18T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Bir giriş logundan kaba kuvvet saldırısını ayıklamak" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/authwatch.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Bir giriş logundan kaba kuvvet saldırısını ayıklamak</h1>
+  <p class="lede">Her başarısız girişe alarm veren bir sistem bir hafta sonra kimsenin bakmadığı bir sisteme dönüşür. Ben de şunu sordum: şifresini unutan çalışanı, kapıyı yoklayan bottan nasıl ayırırım?</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · FastAPI · SQLAlchemy · PostgreSQL · pytest · Docker<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/kaba-kuvvet-saldiri-tespiti">github.com/hasancrlk/kaba-kuvvet-saldiri-tespiti</a>
+  </p>
+
+  <p>Bu proje EMT Cyber stajında verilen ödevlerden biriydi: SSH ve web
+sunucularının giriş loglarını okuyup kaba kuvvet (brute-force) saldırılarını
+tespit etmek. İşin kolay kısmı saldırıyı bulmak. Zor kısmı, bulduğunuz şeyin
+gerçekten saldırı olup olmadığına karar vermek.</p>
+
+<p>İki örneğe bakalım. Bunlar depodaki örnek log dosyasından; IP adresleri
+belgelendirme için ayrılmış aralıklardan:</p>
+
+<pre>Sep 17 03:12:01 srv01 sshd[4101]: Failed password for invalid user admin from 203.0.113.5<br>Sep 17 03:12:04 srv01 sshd[4102]: Failed password for invalid user oracle from 203.0.113.5<br>Sep 17 03:12:07 srv01 sshd[4103]: Failed password for root from 203.0.113.5<br>Sep 17 03:12:10 srv01 sshd[4104]: Failed password for invalid user postgres from 203.0.113.5</pre>
+
+<p>Aynı IP, üç saniye arayla, her seferinde başka bir kullanıcı adı. Bu bir bot.
+Şimdi de şuna bakın:</p>
+
+<pre>Sep 17 09:42:10 srv01 sshd[5210]: Failed password for deniz from 198.51.100.7<br>Sep 17 09:42:16 srv01 sshd[5211]: Failed password for deniz from 198.51.100.7<br>Sep 17 09:42:41 srv01 sshd[5212]: Failed password for deniz from 198.51.100.7</pre>
+
+<p>Bu büyük ihtimalle şifresini hatırlamaya çalışan biri. İkisini ayırmak
+sektörde iyi bilinen bir sorun ve projeyi bu sorunun etrafında kurdum.</p>
+
+<h2 id="önce-saymayı-doğru-yapmak">Önce saymayı doğru yapmak</h2>
+
+<p>Temel kural şu: aynı IP’den 60 saniyede 5 başarısız deneme varsa alarm ver.
+Ama sayacı her dakika sıfırlarsanız saldırgan bir dakikanın sonunda 4,
+sonrakinin başında 4 deneme yapıp eşiğin altında kalır. Bu yüzden <strong>kayan
+pencere</strong> kullandım. Her IP için bir <code>deque</code> tutuyorum ve yeni bir deneme
+geldiğinde pencereden düşen eski kayıtları atıyorum:</p>
+
+<pre>bucket.append(event)<br>while bucket and event.timestamp - bucket[0].timestamp &gt; window:<br>&nbsp;&nbsp;&nbsp;&nbsp;bucket.popleft()<br>if len(bucket) &gt;= threshold:<br>&nbsp;&nbsp;&nbsp;&nbsp;alarm_uret()</pre>
+
+<p>Her kayıt kuyruğa bir kez girip bir kez çıktığı için büyük bir log tek
+geçişte işleniyor. Sabit pencerenin kaçırdığı o 4+4’lük dizi depoda ayrı bir
+test olarak duruyor.</p>
+
+<p>Bir de soğuma süresi ekledim. Eşik aşıldıktan sonra her yeni denemeye ayrı
+alarm üretseydim 500 denemelik bir saldırı 496 alarm demekti. Aynı IP için 5
+dakika boyunca yeni alarm yazılmıyor.</p>
+
+<h2 id="kullanıcıyı-bottan-ayırmak">Kullanıcıyı bottan ayırmak</h2>
+
+<p>Eşiği geçen her yığını saldırı saymak yerine her alarma bir güven puanı
+veriyorum. Puan denemelerin biçimine bakıyor:</p>
+
+<ul>
+  <li>Üç ve daha fazla farklı kullanıcı adı denenmişse puan artıyor, tek bir
+kullanıcı adıysa düşüyor.</li>
+  <li><code>invalid user</code> satırları, yani var olmayan hesaplara yapılan denemeler,
+kullanıcı taramasının işareti.</li>
+  <li>Denemeler arasındaki sürelerin ne kadar düzenli olduğuna bakıyorum. İnsan
+düzensiz aralıklarla dener, otomasyon saat gibi.</li>
+  <li>Aynı IP’den daha önce başarılı giriş yapılmışsa puan düşüyor.</li>
+</ul>
+
+<p>Sonuç <code>high</code>, <code>medium</code> ya da <code>low</code> olarak etiketleniyor ve her alarm bu
+kararın gerekçesini yazıyor. Yukarıdaki iki örnek için çıktı şöyle:</p>
+
+<pre>203.0.113.5&nbsp;&nbsp;&nbsp;güven: high (0.95)<br>&nbsp;&nbsp;- 5 farkli kullanici adi denendi (kullanici tarama).<br>&nbsp;&nbsp;- 4 deneme var olmayan kullanici adina yapildi.<br>&nbsp;&nbsp;- Denemeler neredeyse sabit araliklarla geldi (otomasyon izi).<br>&nbsp;<br>198.51.100.7&nbsp;&nbsp;güven: low (0.0)<br>&nbsp;&nbsp;- Tek kullanici adi - parolasini unutmus bir kullanici olabilir.<br>&nbsp;&nbsp;- Bu IP daha once basariyla giris yapmis (bilinen kaynak).</pre>
+
+<p>Düşük güvenli alarmları silmiyorum, yalnızca etiketliyorum. Neyin önemsiz
+olduğuna analist karar vermeli; araç sadece sıralamayı kolaylaştırıyor.</p>
+
+<p>Bir ayrıntı daha: web loglarında kullanıcı adı çoğu zaman <code>-</code> olarak geliyor.
+Bunu “tek kullanıcı” sayıp puanı düşürseydim gerçek bir bot yığınını haksız
+yere masum gösterirdim. Bilgi yoksa indirim de yok.</p>
+
+<h2 id="başarısızlıkların-ardından-gelen-başarı">Başarısızlıkların ardından gelen başarı</h2>
+
+<p>Bir IP aynı hesaba art arda başarısız denemeler yapıp sonra o hesapla
+başarıyla girerse bu ayrı bir alarm: <code>possible_account_takeover</code>. Burada
+kullanıcı adının eşleşmesini şart koştum. <code>admin</code> hesabına saldırıdan sonra
+<code>deploy</code> ile yapılan sıradan bir giriş bu kapsama girmiyor.</p>
+
+<h2 id="neleri-yapmıyor">Neleri yapmıyor?</h2>
+
+<p>Tespit IP bazlı olduğu için her IP’den az sayıda deneme yapan bir botnet
+eşiğe takılmıyor. Her yükleme ayrı işlendiği için iki dosyaya bölünmüş bir
+saldırı da ikiye ayrılabiliyor. <code>X-Forwarded-For</code> başlığını okumuyorum ve
+servisin kendisinde kimlik doğrulama yok; iç ağda ya da bir ters vekil
+arkasında çalıştırılmalı.</p>
+
+<p>Proje 48 testle geliyor. <code>docker compose up</code> ile PostgreSQL’li olarak
+ayağa kalkıyor ve örnek log depoda olduğu için hemen deneyebilirsiniz.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/kaba-kuvvet-saldiri-tespiti/">https://hasancrlk.github.io/projeler/kaba-kuvvet-saldiri-tespiti/</a></p>
+</main>
+</body>
+</html>

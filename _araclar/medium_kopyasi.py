@@ -24,7 +24,7 @@ KOK = pathlib.Path(__file__).resolve().parent.parent
 SITE = "https://hasancrlk.github.io"
 # Medium bir adresi bir kez okuyup önbelleğe alıyor. Kopya yeniden üretilip yeniden
 # aktarılacaksa sürümü artır: adresler /medium/<ad>-<SURUM>/ olur.
-SURUM = "3"
+SURUM = "4"
 
 PRE = re.compile(r"<pre><code(?: class=\"[^\"]*\")?>(.*?)</code></pre>", re.S)
 

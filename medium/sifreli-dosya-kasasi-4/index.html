@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Parolayı saklamadan dosya şifrelemek | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Parolayı saklamadan dosya şifrelemek" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="Bu servisten üç şey istedim: dosya diske yalnızca şifreli yazılsın, parola hiçbir yerde saklanmasın ve dosya belirli bir sayıda indirildikten ya da belirli bir süre geçtikten sonra erişilemez olsun. Kullanımı şöyle:" />
+<meta property="og:description" content="Bu servisten üç şey istedim: dosya diske yalnızca şifreli yazılsın, parola hiçbir yerde saklanmasın ve dosya belirli bir sayıda indirildikten ya da belirli bir süre geçtikten sonra erişilemez olsun. Kullanımı şöyle:" />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/sifreli-dosya-kasasi-4/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/sifreli-dosya-kasasi-4/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-17T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Parolayı saklamadan dosya şifrelemek" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/vaultcore.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Parolayı saklamadan dosya şifrelemek</h1>
+  <p class="lede">Hassas bir dosyayı e-postayla gönderdiğinizde o dosya yıllarca bir sunucuda açık hâlde durur. Ben bunun yerine bir kez indirilince ya da süresi dolunca kendiliğinden kapanan, parolası hiçbir yerde saklanmayan bir kasa yazdım.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · FastAPI · cryptography · Argon2id · PostgreSQL · Docker<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/sifreli-dosya-kasasi">github.com/hasancrlk/sifreli-dosya-kasasi</a>
+  </p>
+
+  <p>Bu servisten üç şey istedim: dosya diske yalnızca şifreli yazılsın, parola
+hiçbir yerde saklanmasın ve dosya belirli bir sayıda indirildikten ya da
+belirli bir süre geçtikten sonra erişilemez olsun. Kullanımı şöyle:</p>
+
+<pre>curl -X POST http://localhost:8000/api/v1/vault/upload \<br>&nbsp;&nbsp;-H "X-API-Key: $API_KEY" \<br>&nbsp;&nbsp;-F "file=@belge.pdf" -F "password=uzun-ve-guclu-parola" \<br>&nbsp;&nbsp;-F "max_downloads=1" -F "expires_in_hours=24"</pre>
+
+<h2 id="parola-nereye-gidiyor">Parola nereye gidiyor?</h2>
+
+<p>Hiçbir yere. Parolayı Argon2id ile 256 bitlik bir anahtara çeviriyorum, o
+anahtarla da dosyayı AES-256-GCM ile şifreliyorum. Her dosya için ayrı bir
+tuz (16 bayt) ve ayrı bir nonce (12 bayt) üretiyorum. Veritabanına tuzu,
+nonce’u ve dosya bilgilerini yazıyorum; parolayı ve anahtarı yazmıyorum.</p>
+
+<pre>def encrypt(plaintext: bytes, password: str, aad: bytes | None = None):<br>&nbsp;&nbsp;&nbsp;&nbsp;params = _get_crypto_params()<br>&nbsp;&nbsp;&nbsp;&nbsp;salt = os.urandom(SALT_SIZE)<br>&nbsp;&nbsp;&nbsp;&nbsp;nonce = os.urandom(NONCE_SIZE)<br>&nbsp;&nbsp;&nbsp;&nbsp;key = derive_key(password, salt, params)<br>&nbsp;&nbsp;&nbsp;&nbsp;ciphertext = AESGCM(key).encrypt(nonce, plaintext, aad)<br>&nbsp;&nbsp;&nbsp;&nbsp;return EncryptionResult(ciphertext=ciphertext, salt=salt, nonce=nonce, params=params)</pre>
+
+<h3 id="neden-aes-gcm">Neden AES-GCM?</h3>
+
+<p>AES-GCM gizliliği ve bütünlüğü tek işlemde sağlıyor. AES-CBC seçseydim ayrıca
+bir MAC eklemem ve bunları doğru sırada uygulamam gerekecekti; bu da hata
+yapmaya açık bir adım. GCM dolgu (padding) kullanmadığı için padding oracle
+saldırılarından etkilenmiyor ve modern işlemcilerde donanım desteğiyle
+çalışıyor.</p>
+
+<p>Dikkat edilmesi gereken tek nokta aynı anahtarla aynı nonce’u iki kez
+kullanmamak. Bu yüzden her şifrelemede <code>os.urandom</code> ile yeni bir nonce
+üretiyorum.</p>
+
+<h3 id="neden-parolanın-kendisi-değil-de-argon2id">Neden parolanın kendisi değil de Argon2id?</h3>
+
+<p>İnsanların seçtiği parolalar tahmin edilebilir. Parolayı doğrudan anahtar
+olarak kullansaydım saldırgan çok kısa sürede çok sayıda tahmin
+deneyebilirdi. Argon2id her türetmede yüksek bellek istiyor; bu projede 64 MB,
+3 tur ve 4 iş parçacığı. Bellek GPU’larda kısıtlı olduğu için paralel tahmin
+yapmak ciddi şekilde pahalılaşıyor.</p>
+
+<p>Argon2 parametrelerini her dosyayla birlikte saklıyorum. Yarın ayarları
+güçlendirsem bile eski dosyalar kendi parametreleriyle açılmaya devam ediyor.</p>
+
+<h2 id="gözden-kaçabilecek-ayrıntılar">Gözden kaçabilecek ayrıntılar</h2>
+
+<ul>
+  <li><strong>Dosya kimliğini şifreli veriye bağladım.</strong> Kimlik, AES-GCM’nin ek
+doğrulanmış veri (AAD) alanına giriyor. Biri veritabanında iki dosyanın
+şifreli içeriğinin yerini değiştirirse doğrulama başarısız oluyor.</li>
+  <li><strong>Hata mesajları birbirinden ayırt edilemiyor.</strong> Yanlış parola ile bozuk
+veri aynı cevabı veriyor; dışarıya fazladan bilgi sızmıyor.</li>
+  <li><strong>İki katmanlı deneme sınırı koydum.</strong> IP başına dakikada 5 indirme
+denemesi yapılabiliyor. Aynı dosyaya 5 yanlış parola girilirse dosya 15
+dakika kilitleniyor. İkinci katman, farklı IP’lerden gelen denemelere karşı
+da işe yarıyor.</li>
+  <li><strong>İndirme sayacı atomik.</strong> Tek kullanımlık bir bağlantıya aynı anda iki
+istek gelirse yalnızca biri kazanıyor.</li>
+  <li><strong>Kaynak tüketimini sınırladım.</strong> Yüklemeler parça parça okunuyor, aynı
+anda çalışan anahtar türetme sayısı da sınırlı.</li>
+  <li><strong>Süresi dolan dosyalar diskten de siliniyor.</strong> Yalnızca kayıt değil,
+şifreli verinin kendisi de kalkıyor.</li>
+</ul>
+
+<h2 id="bu-servis-neyi-vaat-etmiyor">Bu servis neyi vaat etmiyor?</h2>
+
+<p>Bir süre reponun GitHub açıklamasında “zero-knowledge” yazıyordu. Doğru
+değildi, düzelttim. Şifrelemeyi sunucu yaptığı için sunucu, istek süresince
+parolayı ve dosyanın açık hâlini görüyor. Gerçek uçtan uca gizlilik için
+şifrelemenin istemci tarafında yapılması gerekir.</p>
+
+<p>Bunun dışında servis tek bir API anahtarıyla korunuyor, kullanıcı bazlı
+yetkilendirme yok. TLS’i önüne koyacağınız bir ters vekil (nginx, Caddy)
+sağlamalı. Python’da anahtarı bellekten güvenilir biçimde silmek mümkün değil
+ve silinen dosyalar için güvenli disk silme uygulamıyorum. Bunları README’de
+de ayrı bir başlık altında yazdım; bir güvenlik aracının neyi korumadığını
+bilmek, neyi koruduğunu bilmek kadar önemli.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/sifreli-dosya-kasasi/">https://hasancrlk.github.io/projeler/sifreli-dosya-kasasi/</a></p>
+</main>
+</body>
+</html>
