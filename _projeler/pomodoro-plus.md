@@ -1,7 +1,7 @@
 ---
 title: "Kendim için geliştirdiğim odak uygulaması: Pomodoro Plus"
 kisa: Telefonu elden bırakmayı puanla ödüllendiren, mobil öncelikli (PWA) pomodoro uygulaması. Geliştirme sürüyor.
-ozet: "Pomodoro Plus'ı kendi çalışma düzenim için geliştiriyorum. Odak süresini telefona dokunmadan tamamlayan kullanıcı daha fazla puan kazanıyor. Uygulama henüz geliştirme aşamasında; hedef App Store ve Google Play."
+ozet: "Bir pomodoro sayacı süreyi sayar ama telefonun elinizde olup olmadığıyla ilgilenmez. Peki sayaç telefonu bırakmanızı ödüllendirse?"
 date: 2026-08-11
 teknolojiler: [Next.js, TypeScript, Tailwind CSS, Zustand, PWA]
 repo: https://github.com/hasancrlk/Pomodoro_Plus
@@ -10,32 +10,30 @@ sira: 8
 ref: pomodoro
 ---
 
-> **Durum:** Uygulama geliştirme aşamasında. Tamamlandığında App Store ve
-> Google Play'de yayınlamayı planlıyorum. Bu yazı mevcut sürümü anlatıyor.
+> **Durum:** Uygulama hâlâ geliştirme aşamasında. Tamamlayınca App Store ve
+> Google Play'de yayınlamayı planlıyorum. Bu yazı şu anki sürümü anlatıyor.
 
-Pomodoro tekniği 25 dakika odaklanma ve 5 dakika moladan oluşur. Bu
-uygulamayı kendi çalışma düzenim için yazmaya başladım. Klasik bir zamanlayıcı
-sürenin ne kadar kaldığını gösterir ama sayaç çalışırken telefonun elde olup
-olmadığıyla ilgilenmez. Pomodoro Plus'ın temel fikri, telefonu bırakmayı bir
-puan sistemiyle teşvik etmek.
+Pomodoro tekniği basit: 25 dakika odaklan, 5 dakika mola ver. Pomodoro
+Plus'ı kendim için yazmaya başladım. Fikir şu: odak süresini telefona
+dokunmadan tamamlarsanız daha fazla puan kazanıyorsunuz.
 
-## Puan sistemi
+## Puanlar
 
-- Odak süresi telefona dokunulmadan tamamlanırsa **+12** puan.
-- Odak süresi tamamlanır ama arada telefona dokunulursa **+6** puan.
-- Mola tamamlanırsa **+2** puan.
-- Sayaç iptal edilirse **−5** puan.
+- Odak süresini telefona dokunmadan bitirirseniz **+12**.
+- Bitirirseniz ama arada telefona dokunduysanız **+6**.
+- Molayı tamamlarsanız **+2**.
+- Sayacı iptal ederseniz **−5**.
 
-İptal cezası ödüllerden küçük tutuldu; amaç uygulamayı açmayı caydırmak
-değil, süreyi tamamlamayı teşvik etmek. Kazanılan puanlarla mağazadan Altın,
-Neon, Orman ve Okyanus temaları, ek mola hakkı ve rozetler açılıyor.
+İptal cezasını bilerek ödüllerden küçük tuttum. Amacım uygulamayı açmaktan
+kaçındırmak değil, süreyi tamamlamaya teşvik etmek. Kazandığınız puanlarla
+mağazadan Altın, Neon, Orman ve Okyanus temalarını, ek mola hakkını ve
+rozetleri açabiliyorsunuz.
 
-## Telefona dokunulduğunun tespiti
+## Telefona dokunduğunuzu nasıl anlıyor?
 
-Bir web uygulaması cihazın genel kullanımına erişemez. Kullanılabilecek en
-yakın sinyal, uygulama sayfasının arka plana geçip geçmediği. Kullanıcı
-başka bir uygulamaya geçtiğinde tarayıcı `visibilitychange` olayını
-tetikliyor:
+Bir web uygulaması telefonun genel kullanımını göremez. Elimdeki en yakın
+sinyal, uygulama sayfasının arka plana geçip geçmediği. Başka bir uygulamaya
+geçtiğinizde tarayıcı `visibilitychange` olayını tetikliyor:
 
 ```tsx
 useEffect(() => {
@@ -47,31 +45,31 @@ useEffect(() => {
 }, [markDistracted]);
 ```
 
-Bu ölçüm yaklaşık bir ölçüm. Ekranın kapatılması da sayfayı gizler ve aynı
-olayı tetikler. Kesin bir ekran süresi ölçümü için cihazın yerel (native)
-API'lerine erişim gerekiyor; mağaza sürümü için bu konu yol haritasında.
+Bunun yaklaşık bir ölçüm olduğunu baştan söyleyeyim: ekranı kapatmanız da
+sayfayı gizliyor ve aynı olayı tetikliyor. Gerçek bir ekran süresi ölçümü
+için cihazın kendi (native) API'lerine erişmek gerekiyor; bu, mağaza sürümünün
+yapılacaklar listesinde.
 
-## Acil kişiler
+## Acil durumlar için bir kapı
 
 Odak süresi boyunca uygulamanın diğer bölümleri kilitleniyor. Tek istisna
-kullanıcının önceden eklediği acil kişiler; bu kişiler `tel:` bağlantısıyla
-aranabiliyor.
+önceden eklediğiniz acil kişiler; onları `tel:` bağlantısıyla
+arayabiliyorsunuz.
 
-## Teknik yapı
+## Nasıl yaptım?
 
-- **Arayüz:** Next.js App Router, TypeScript ve Tailwind CSS v4. Sayaç
-  dairesel bir geri sayım animasyonuyla gösteriliyor.
-- **Durum yönetimi:** Zustand. Puanlar, puan geçmişi, acil kişiler, satın
-  alınan öğeler ve etkin tema `persist` ile tarayıcıda saklanıyor. Sunucu ya
-  da hesap gerekmiyor.
-- **PWA:** Web manifesti ve bir service worker ile uygulama ana ekrana
-  eklenebiliyor ve temel çevrimdışı önbellekleme yapıyor.
+Arayüzü Next.js App Router, TypeScript ve Tailwind CSS v4 ile yazdım; sayaç
+dairesel bir geri sayım animasyonuyla dönüyor. Durumu Zustand ile
+yönetiyorum. Puanlar, puan geçmişi, acil kişiler, satın aldıklarınız ve
+seçtiğiniz tema tarayıcıda saklanıyor; sunucu ya da hesap gerekmiyor. Bir web
+manifesti ve service worker sayesinde uygulamayı ana ekrana ekleyebiliyor,
+internet yokken de temel olarak kullanabiliyorsunuz.
 
-## Sıradaki adımlar
+## Sırada ne var?
 
-- Sayaç şu anda kalan süreyi her saniye bir azaltıyor. Tarayıcılar arka
+- Sayaç şu an kalan süreyi her saniye bir azaltıyor. Tarayıcılar arka
   plandaki sekmelerde zamanlayıcıları yavaşlattığı için süre kayabiliyor.
-  Bitiş anını saklayıp kalan süreyi ondan hesaplamak daha doğru bir yöntem.
-- Süre dolduğunda bildirim gönderilmesi.
-- Puan geçmişi zaten tutuluyor; bunu gösteren bir istatistik ekranı.
+  Bitiş anını saklayıp kalan süreyi ondan hesaplamak daha doğru olacak.
+- Süre dolduğunda bildirim.
+- Puan geçmişi zaten tutuluyor; onu gösteren bir istatistik ekranı.
 - Mağaza sürümü için native ekran süresi entegrasyonu.
