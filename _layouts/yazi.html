@@ -1,0 +1,21 @@
+---
+layout: default
+---
+{%- assign L = page.lang | default: "tr" -%}
+{%- assign t = site.data.metin[L] -%}
+{%- if L == "en" -%}{%- assign ana = "/en/" -%}{%- else -%}{%- assign ana = "/" -%}{%- endif -%}
+<article class="yazi">
+  <p class="ust-bilgi"><a href="{{ ana | relative_url }}#projeler">{{ t.geri }}</a></p>
+  <h1>{{ page.title }}</h1>
+  <p class="lede">{{ page.ozet }}</p>
+
+  <dl class="kunye">
+    <div><dt>{{ t.teknolojiler }}</dt><dd>{{ page.teknolojiler | join: " · " }}</dd></div>
+    <div><dt>{{ t.tarih }}</dt><dd>{{ page.date | date: "%m.%Y" }}</dd></div>
+    <div><dt>{{ t.kod }}</dt><dd><a href="{{ page.repo }}">{{ page.repo | remove: "https://" }}</a></dd></div>
+  </dl>
+
+  {{ content }}
+
+  <p class="kod-bag"><a class="dugme" href="{{ page.repo }}">{{ t.koda_git }}</a></p>
+</article>

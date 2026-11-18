@@ -1,0 +1,38 @@
+tr:
+  projeler: Projeler
+  hakkimda: Hakkımda
+  deneyim: Deneyim
+  iletisim: İletişim
+  tum_projeler: Tüm projeler
+  one_cikanlar: Öne çıkanlar
+  teknolojiler: Teknolojiler
+  tarih: Tarih
+  kod: Kaynak kod
+  koda_git: GitHub'da incele
+  oku: Yazıyı oku →
+  geri: ← Tüm projeler
+  dil_adi: English
+  kategoriler:
+    guvenlik: Siber güvenlik
+    backend: Arka uç ve veritabanı
+    mobil-web: Mobil ve web
+    donanim: Donanım ve gömülü sistemler
+en:
+  projeler: Projects
+  hakkimda: About
+  deneyim: Experience
+  iletisim: Contact
+  tum_projeler: All projects
+  one_cikanlar: Featured
+  teknolojiler: Tech stack
+  tarih: Date
+  kod: Source code
+  koda_git: View on GitHub
+  oku: Read the write-up →
+  geri: ← All projects
+  dil_adi: Türkçe
+  kategoriler:
+    guvenlik: Cybersecurity
+    backend: Backend and databases
+    mobil-web: Mobile and web
+    donanim: Hardware and embedded

@@ -1,0 +1,52 @@
+<!doctype html>
+{%- assign L = page.lang | default: "tr" -%}
+{%- assign t = site.data.metin[L] -%}
+{%- if L == "en" -%}{%- assign ana = "/en/" -%}{%- else -%}{%- assign ana = "/" -%}{%- endif -%}
+{%- comment -%} Karşı dildeki sayfa: proje yazılarında ref ile, diğerlerinde alt_url ile {%- endcomment -%}
+{%- if page.ref -%}
+  {%- if L == "en" -%}{%- assign karsi = site.projeler | where: "ref", page.ref | first -%}
+  {%- else -%}{%- assign karsi = site.projects | where: "ref", page.ref | first -%}{%- endif -%}
+  {%- assign karsi_url = karsi.url -%}
+{%- else -%}
+  {%- assign karsi_url = page.alt_url -%}
+{%- endif -%}
+<html lang="{{ L }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {%- seo -%}
+  {%- if karsi_url %}
+  <link rel="alternate" hreflang="{% if L == 'en' %}tr{% else %}en{% endif %}" href="{{ karsi_url | absolute_url }}">
+  {%- endif %}
+  <link rel="stylesheet" href="{{ '/assets/stil.css' | relative_url }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+  <header class="ust">
+    <div class="kap ust-ic">
+      <a class="logo" href="{{ ana | relative_url }}">Hasan Carlak</a>
+      <nav>
+        <a href="{{ ana | relative_url }}#projeler">{{ t.projeler }}</a>
+        <a href="{{ ana | relative_url }}#hakkimda">{{ t.hakkimda }}</a>
+        <a href="https://github.com/{{ site.github_username }}">GitHub</a>
+        {%- if karsi_url %}
+        <a class="dil" href="{{ karsi_url | relative_url }}" hreflang="{% if L == 'en' %}tr{% else %}en{% endif %}">{{ t.dil_adi }}</a>
+        {%- endif %}
+      </nav>
+    </div>
+  </header>
+  <main class="kap">
+    {{ content }}
+  </main>
+  <footer class="alt">
+    <div class="kap">
+      <span>© {{ site.time | date: "%Y" }} Hasan Carlak</span>
+      <span>
+        <a href="https://github.com/{{ site.github_username }}">GitHub</a> ·
+        <a href="{{ site.linkedin }}">LinkedIn</a> ·
+        <a href="mailto:{{ site.email }}">{{ site.email }}</a>
+      </span>
+    </div>
+  </footer>
+</body>
+</html>

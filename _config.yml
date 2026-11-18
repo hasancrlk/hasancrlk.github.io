@@ -1,0 +1,48 @@
+title: Hasan Carlak
+description: >-
+  Bilgisayar mühendisliği son sınıf öğrencisi. Siber güvenlik, adli bilişim ve
+  güvenli yazılım geliştirme üzerine projeler ve yazılar.
+url: https://hasancrlk.github.io
+baseurl: ""
+lang: tr
+author: Hasan Carlak
+github_username: hasancrlk
+linkedin: https://www.linkedin.com/in/hasan-carlak-294798253/
+email: hasan.crlk@outlook.com
+
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge
+
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+collections:
+  projeler:
+    output: true
+    permalink: /projeler/:name/
+  projects:
+    output: true
+    permalink: /en/projects/:name/
+
+defaults:
+  - scope:
+      path: ""
+      type: projeler
+    values:
+      layout: yazi
+      lang: tr
+  - scope:
+      path: ""
+      type: projects
+    values:
+      layout: yazi
+      lang: en
+
+exclude:
+  - README.md
+  - YAYIN_PLANI.md

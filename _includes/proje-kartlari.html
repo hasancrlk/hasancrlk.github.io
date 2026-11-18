@@ -1,0 +1,22 @@
+{%- comment -%}
+  Kullanım: {% include proje-kartlari.html liste=site.projeler L="tr" %}
+  Kategorilere göre gruplar; kategori sırası aşağıda sabit.
+{%- endcomment -%}
+{%- assign t = site.data.metin[include.L] -%}
+{%- assign sirali = include.liste | sort: "sira" -%}
+{%- assign kategoriler = "guvenlik,backend,mobil-web,donanim" | split: "," -%}
+{%- for k in kategoriler -%}
+  {%- assign grup = sirali | where: "kategori", k -%}
+  {%- if grup.size > 0 %}
+  <h3 class="kategori">{{ t.kategoriler[k] }}</h3>
+  <div class="kartlar">
+    {%- for p in grup %}
+    <a class="kart" href="{{ p.url | relative_url }}">
+      <span class="kart-baslik">{{ p.title }}</span>
+      <span class="kart-ozet">{{ p.kisa }}</span>
+      <span class="etiketler">{% for e in p.teknolojiler limit: 4 %}<span>{{ e }}</span>{% endfor %}</span>
+    </a>
+    {%- endfor %}
+  </div>
+  {%- endif -%}
+{%- endfor -%}
