@@ -1,7 +1,7 @@
 ---
-title: "Elli ürün, üç yüz istek ve tek bir SQL cümlesi"
-kisa: Yüzlerce eşzamanlı satın alma isteği altında stoğun asla eksiye düşmediğini testle kanıtlayan arka uç servisi.
-ozet: "Stokta 50 ürün var, aynı saniyede 300 kişi satın almaya çalışıyor. Kaç kişi ürünü alır? Doğru cevap 50. Ama yanlış yazılmış bir kod 51, hatta 60 da diyebilir."
+title: "Race Condition ve Stok Yönetimi: 50 Ürün, 300 İstek, Tek Bir SQL Sorgusu"
+kisa: Yüzlerce concurrent satın alma isteği altında stoğun asla negatife düşmediğini testle kanıtlayan bir backend servisi.
+ozet: "Stokta 50 ürün varken aynı anda 300 satın alma isteği gelirse, yanlış yazılmış bir kod 50'den fazla satış yapabilir. Bu bir race condition; çözümü de uygulama kodunda değil, veritabanında."
 date: 2026-08-31
 teknolojiler: [Python, FastAPI, SQLAlchemy async, asyncpg, PostgreSQL, pytest]
 repo: https://github.com/hasancrlk/Es_Zamanlilik_Stok_Yonetimi
@@ -10,14 +10,18 @@ sira: 7
 ref: stok
 ---
 
-EMT Cyber stajında aldığım ilk ödev buydu. Senaryo bir flaş indirim: stokta 50
-oyun konsolu var ve kampanya başladığı anda yüzlerce kişi aynı anda "Satın Al"a
-basıyor. Benden istenen iki şey vardı: stoktan fazla satış olmayacak ve sistem
-yük altında kilitlenmeyecek.
+Senaryo bir flash sale: stokta 50 oyun konsolu var ve kampanya başladığı anda
+yüzlerce kullanıcı aynı anda "Satın Al" isteği gönderiyor. Sistemden iki şey
+bekleniyor: overselling olmayacak, yani stoktan fazla satış yapılmayacak, ve
+sistem yük altında kilitlenmeyecek.
 
-## Kâğıt üstünde doğru görünen kod
+Bu, EMT Cyber stajında aldığım ilk ödevdi. Bu yazıda problemin kaynağını, tek bir
+atomik SQL sorgusuyla nasıl çözdüğümü ve bunu bir concurrency testiyle nasıl
+kanıtladığımı anlatıyorum.
 
-Bu işi yazarken çoğumuzun aklına ilk gelen yöntem şudur:
+## Problem: read-then-write
+
+İlk akla gelen yaklaşım stoğu okumak, yeterli mi diye bakmak ve sonra azaltmak:
 
 ```python
 urun = await db.get(Item, item_id)
@@ -25,18 +29,15 @@ if urun.stock >= adet:
     urun.stock -= adet
 ```
 
-Stoğu oku, yetiyor mu bak, yetiyorsa azalt. Tek bir kullanıcı için kusursuz.
-Peki iki istek ilk satırı aynı anda çalıştırırsa ne olur? İkisi de "stokta 1
-kaldı" görür, ikisi de satışı tamamlar ve stok `-1` olur. Bunun adı **kayıp
-güncelleme** (lost update).
+Tek bir istek için bu kod doğru çalışır. İki istek ilk satırı aynı anda
+çalıştırırsa ikisi de aynı stok değerini okur ve ikisi de satışı tamamlar. Buna
+**lost update** denir ve sonuç negatif stoktur. Bu tür race condition'lar
+yalnızca gerçekten concurrent isteklerde ortaya çıktığı için, istekleri tek tek
+göndererek yapılan denemelerde görünmez.
 
-Bu hatayı sinsi yapan şey, tek tek denediğinizde hiçbir zaman ortaya
-çıkmaması. Hata ancak gerçekten eşzamanlı istek geldiğinde görünüyor.
+## Çözüm: atomik UPDATE
 
-## Kontrolü ve azaltmayı tek cümlede yapmak
-
-Çözüm olarak kontrol ile azaltmayı birbirinden ayırmadım, tek bir SQL
-cümlesinde birleştirdim:
+Kontrol ve azaltmayı tek bir SQL sorgusunda birleştirdim:
 
 ```python
 result = await db.execute(
@@ -48,23 +49,22 @@ result = await db.execute(
 new_stock = result.scalar_one_or_none()
 ```
 
-Bu cümle çalışırken PostgreSQL ilgili satırı kilitliyor. Aynı ürüne gelen
-diğer istekler sırada bekliyor ve sıra kendilerine geldiğinde `stock >= adet`
-koşuluna stoğun **o anki** değeriyle yeniden bakıyor. Stok yetmiyorsa hiçbir
-satır güncellenmiyor; ben de bu durumda ürün yoksa `404`, stok bittiyse `409`
-döndürüyorum.
+Bu sorgu çalışırken PostgreSQL ilgili satıra bir **row-level lock** koyuyor. Aynı
+satıra gelen diğer istekler transaction tamamlanana kadar bekliyor ve sıra
+kendilerine geldiğinde `stock >= adet` koşulunu güncel değerle yeniden
+değerlendiriyor. Stok yetmiyorsa hiçbir satır güncellenmiyor; servis bu durumda
+ürün yoksa `404`, stok bittiyse `409` dönüyor.
 
-Yani ek bir `SELECT ... FOR UPDATE` sorgusu, uygulama tarafında kilit ya da
-yeniden deneme döngüsü yazmama gerek kalmadı. Kilitleme işini veritabanına
-bıraktım.
+Bu yaklaşımla ek bir `SELECT ... FOR UPDATE`, uygulama tarafında lock ya da retry
+mekanizmasına gerek kalmıyor; locking işi veritabanına bırakılıyor.
 
-Bir de tabloya `CHECK (stock >= 0)` kısıtı ekledim. Kodu ileride biri
-yanlışlıkla değiştirse bile veritabanı eksi stoğu kabul etmiyor.
+Son savunma hattı olarak tabloda bir `CHECK (stock >= 0)` constraint'i var. Kod
+ileride yanlışlıkla değiştirilse bile veritabanı negatif stoğu kabul etmiyor.
 
-## Peki bunun çalıştığını nasıl kanıtlarsınız?
+## Kanıt: concurrency testi
 
-Tek tek istek gönderen bir test burada hiçbir şey kanıtlamaz, çünkü yanlış kod
-da o testi geçer. Bu yüzden 300 isteği aynı anda gönderen bir test yazdım:
+Bu davranış ancak concurrent istek gönderen bir testle doğrulanabilir; istekleri
+tek tek gönderen bir test yanlış kodla da geçer:
 
 ```python
 async def test_concurrent_purchases_never_go_negative(client):
@@ -81,20 +81,24 @@ async def test_concurrent_purchases_never_go_negative(client):
     assert status_codes.count(409) == concurrent_requests - stock
 ```
 
-Beklenen sonuç tam 50 başarılı satış, 250 reddedilen istek ve veritabanında 0
-stok. Testi bilerek gerçek bir PostgreSQL üzerinde çalıştırıyorum; satır
-kilidi davranışını SQLite ile sınamak mümkün değil.
+Beklenen sonuç tam 50 başarılı satış (`201`), 250 reddedilen istek (`409`) ve
+veritabanında 0 stok. Test bilinçli olarak gerçek bir PostgreSQL üzerinde
+çalışıyor; row-level lock davranışı SQLite ile test edilemez.
 
 ## Neden async?
 
-Bu iş yükünde zamanın neredeyse tamamı veritabanını beklemekle geçiyor.
-Senkron yazsaydım bekleyen her istek bir iş parçacığını meşgul edecek ve havuz
-kısa sürede dolacaktı. Async SQLAlchemy ve asyncpg ile tek bir olay döngüsü,
-bir istek beklerken diğerlerini işlemeye devam ediyor.
+Bu workload I/O-bound: zamanın büyük kısmı veritabanı cevabını beklemekle
+geçiyor. Senkron bir yapıda bekleyen her istek bir worker thread'i meşgul eder
+ve thread pool kısa sürede tükenir. Async SQLAlchemy ve asyncpg ile tek bir event
+loop, bir istek beklerken diğerlerini işlemeye devam ediyor. Kısa süreli ani yük
+senaryoları için uygun model bu.
 
-## Bilerek dışarıda bıraktıklarım
+## Kapanış
 
-Ödevin odağı eşzamanlılıktı, o yüzden kimlik doğrulama ve ödeme adımı
-eklemedim. Gerçek bir sistemde stok önce rezerve edilir, ödeme tamamlanmazsa
-geri bırakılır. Şema değişiklikleri için de Alembic gibi bir migration aracı
-eklemek gerekir.
+Proje yalnızca concurrency problemine odaklanıyor; authentication ve ödeme adımı
+yok. Gerçek bir sistemde stok önce reserve edilir, ödeme tamamlanmazsa serbest
+bırakılır. Tablolar uygulama açılışında oluşturuluyor; schema değişiklikleri için
+Alembic gibi bir migration aracı eklenmesi gerekir.
+
+Race condition'ları "dikkatli kod yazarak" çözmeye çalışmak yerine işi
+veritabanına bırakmak, hem daha basit hem daha güvenilir bir sonuç veriyor.

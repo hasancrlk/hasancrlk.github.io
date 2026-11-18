@@ -1,7 +1,7 @@
 ---
-title: "Staja başlarken adını bilmediğim bir araç: dosya bütünlüğü izleme"
-kisa: Bir klasörün imzalı parmak izini alıp sonradan değişen, eklenen ve silinen dosyaları bulan adli bilişim aracı.
-ozet: "Staja başladığımda \"File Integrity Monitoring\" diye bir şey duymamıştım. Ödev olarak önüme geldiğinde ilk sorum basitti: bir dosyanın değiştiğini nasıl anlarsınız? Asıl soru ise daha sonra geldi."
+title: "File Integrity Monitoring: Baseline'ın Kendisi Değiştirilirse Ne Olur?"
+kisa: Bir klasörün imzalı baseline'ını alıp sonradan değişen, eklenen ve silinen dosyaları tespit eden bir FIM aracı.
+ozet: "Bir FIM aracı dosyalardaki değişikliği yakalayabilir; ama saldırgan aracın kendi kayıtlarını da değiştirirse bunu fark edebilir mi? Chain of custody tam olarak bu soruyla ilgili."
 date: 2026-09-17
 teknolojiler: [Python, FastAPI, SQLAlchemy, Alembic, Typer, PostgreSQL, Docker]
 repo: https://github.com/hasancrlk/dosya-butunlugu-izleme
@@ -10,17 +10,23 @@ sira: 2
 ref: fim-sentinel
 ---
 
-Bir sunucuya sızan saldırgan dosya sisteminde iz bırakır: bir sayfaya zararlı
-kod ekler, `shell.php` gibi bir arka kapı yükler ya da bir yapılandırma
-dosyasını değiştirir. Dosya bütünlüğü izleme (FIM) bunları yakalamak için iki
-adım kullanıyor:
+Bir sunucuya sızan saldırgan çoğu zaman dosya sisteminde iz bırakır: bir sayfaya
+zararlı kod ekler, `shell.php` gibi bir web shell yükler ya da bir config
+dosyasını değiştirir. File Integrity Monitoring (FIM) bu değişiklikleri yakalamak
+için kullanılan klasik yöntem.
 
-1. Klasörün güvenilir hâlinin parmak izini alıyorsunuz. Buna **temel kayıt**
-   (baseline) deniyor.
-2. Klasörü belirli aralıklarla yeniden tarayıp temel kayıtla
-   karşılaştırıyorsunuz.
+Staja başlamadan önce FIM kavramını bilmiyordum; EMT Cyber'de ödev olarak
+önüme geldiğinde ilk iş ne olduğunu ve neden bu kadar yaygın kullanıldığını
+anlamak oldu. Bu yazıda geliştirdiğim FIM-Sentinel'i ve özellikle aracın kendi
+kayıtlarını nasıl koruduğunu anlatıyorum.
 
-Yazdığım aracın komut satırında bu şöyle görünüyor:
+## FIM nasıl çalışır?
+
+İki adımdan oluşur:
+
+1. Klasörün güvenilir hâlinin bir **baseline**'ı alınır: her dosyanın hash'i,
+   boyutu, izinleri ve sahibi.
+2. Klasör belirli aralıklarla yeniden taranır ve baseline ile karşılaştırılır.
 
 ```
 $ python -m cli.fim_cli baseline --path /var/www/html
@@ -31,23 +37,22 @@ $ python -m cli.fim_cli scan --baseline-id 1
 │ ADDED    │ /var/www/html/shell.php  │ New file detected.      │
 ```
 
-Her dosya için SHA-256 özetini, boyutunu, izinlerini ve sahibini
-saklıyorum. Dosyaları 64 KB'lık parçalar hâlinde okuduğum için büyük dosyalar
-belleği zorlamıyor.
+Dosyalar 64 KB'lık chunk'lar hâlinde okunup SHA-256 ile hash'leniyor; büyük
+dosyalar belleği zorlamıyor.
 
-## Peki saldırgan temel kaydı da değiştirirse?
+## Asıl problem: baseline'ın bütünlüğü
 
-Karşılaştırma ne kadar iyi olursa olsun, temel kayıt sonuçta bir
-veritabanında duruyor. Veritabanına erişen bir saldırgan yüklediği
-`shell.php`'yi temel kayda da ekler ve tarama "her şey yolunda" der.
+Karşılaştırma ne kadar doğru olursa olsun baseline bir veritabanında duruyor.
+Veritabanına erişen bir saldırgan, yüklediği `shell.php`'yi baseline'a da ekler
+ve tarama "değişiklik yok" der.
 
-Adli bilişimde buna **delil zinciri** (chain of custody) deniyor: delilin
-toplandığı andan itibaren değiştirilmediğini kanıtlayabilmek. Araçta bunun
-için birkaç önlem aldım.
+Adli bilişimde bu soru **chain of custody** (delil zinciri) kavramıyla karşılanır:
+delilin toplandığı andan itibaren değiştirilmediğini kanıtlayabilmek. FIM-Sentinel
+bunun için şu önlemleri alıyor:
 
-**Temel kaydı imzalıyorum.** Her temel kayıt `FIM_HMAC_KEY` ile HMAC-SHA256
-olarak imzalanıyor. İmzayı dosya sırasından bağımsız olsun diye sıralanmış
-satırlar üzerinden hesaplıyorum:
+**Baseline imzalanıyor.** Her baseline `FIM_HMAC_KEY` ile HMAC-SHA256 olarak
+imzalanıyor. İmza, dosya sırasından bağımsız olsun diye sıralanmış satırlar
+üzerinden hesaplanıyor:
 
 ```python
 def sign_baseline(target_path, follow_symlinks, entries) -> str:
@@ -62,37 +67,44 @@ def sign_baseline(target_path, follow_symlinks, entries) -> str:
     return mac.hexdigest()
 ```
 
-İmzası tutmayan bir temel kayıtla tarama istenirse araç HTTP 409 ile
-reddediyor ve bu girişimi de kayda geçiriyor.
+İmzası tutmayan bir baseline ile tarama istenirse API HTTP 409 dönüyor ve bu
+girişim audit log'a yazılıyor.
 
-**Denetim kaydını zincirliyorum.** Yapılan her işlem bir denetim kaydına
-yazılıyor ve her satır bir öncekinin özetine bağlı. Ortadan bir satır silmek,
-bir satırı değiştirmek ya da sırayı bozmak zinciri kırıyor; `verify-audit`
-komutu kırılan yeri gösteriyor. PostgreSQL'de ayrıca bir tetikleyici bu
-tablodaki UPDATE ve DELETE işlemlerini engelliyor.
+**Audit log zincirleniyor.** Her işlem bir audit log'a yazılıyor ve her satır bir
+öncekinin hash'ine bağlı (tamper-evident log). Bir satırı silmek, değiştirmek ya
+da sırasını bozmak zinciri kırıyor; `verify-audit` komutu kırılan satırı
+gösteriyor. PostgreSQL tarafında bir trigger bu tablodaki UPDATE ve DELETE
+işlemlerini ayrıca engelliyor.
 
-**Sembolik bağlantıları takip etmiyorum.** Bağlantının hedefini
-kaydediyorum. Böylece bağlantının başka bir dosyaya çevrilmesi değişiklik
-olarak görünüyor ve izlenen klasörün dışına hiç çıkılmıyor.
+**Symlink'ler takip edilmiyor.** Link'in hedefi kaydediliyor. Böylece bir
+symlink'in başka bir dosyaya yönlendirilmesi değişiklik olarak yakalanıyor ve
+izlenen klasörün dışındaki dosyalar okunmuyor.
 
-**Okunamayan dosyayı silinmiş saymıyorum.** İzin yüzünden okunamayan bir
-dosya `DELETED` değil, hata olarak raporlanıyor. Adli bir incelemede bu ayrım
-yanlış bir sonuca varmanızı önlüyor.
+**Okunamayan dosya "silindi" sayılmıyor.** Permission nedeniyle okunamayan bir
+dosya `DELETED` olarak değil, error olarak raporlanıyor. Bir incelemede bu ayrım
+yanlış bir sonuca varılmasını önlüyor.
 
-Bunun bir sınırı var ve açıkça yazmak istiyorum: `FIM_HMAC_KEY` izlenen
-sunucunun veritabanından ayrı bir yerde durmalı. Hem veritabanına hem
-anahtara erişen biri temel kaydı yeniden imzalayabilir.
+Bunun belgelenmiş bir sınırı var: `FIM_HMAC_KEY` izlenen sunucunun
+veritabanından ayrı bir yerde (örneğin bir secret manager'da) tutulmalı. Hem
+veritabanına hem key'e erişen biri baseline'ı yeniden imzalayabilir.
 
-## Günlük kullanım
+## Otomasyon ve API
 
-`scan` komutu değişiklik bulduğunda 2 çıkış koduyla bitiyor. Bu küçük ayrıntı
-sayesinde aracı doğrudan zamanlanmış bir göreve bağlayabiliyorsunuz:
+`scan` komutu değişiklik bulduğunda exit code 2 ile bitiyor; bu sayede araç
+doğrudan cron'a ya da bir CI job'ına bağlanabiliyor:
 
 ```bash
-0 * * * * fim-sentinel scan -b 1 || echo "Bütünlük uyarısı" | mail -s FIM yonetici@ornek.com
+0 * * * * fim-sentinel scan -b 1 || echo "FIM alert" | mail -s FIM admin@example.com
 ```
 
-Aynı işlemleri REST API üzerinden de yapabiliyorsunuz. API `X-API-Key`
-istiyor ve yalnızca `FIM_ALLOWED_PATHS` ile izin verilen klasörleri
-tarayabiliyor. Komut satırı ile API aynı servis katmanını kullandığı için
-hiçbir kuralı iki kez yazmadım.
+Aynı işlemler REST API üzerinden de yapılabiliyor. API `X-API-Key` istiyor ve
+yalnızca `FIM_ALLOWED_PATHS` ile izin verilen dizinleri tarayabiliyor. CLI ve API
+aynı service katmanını kullandığı için hiçbir kural iki kez yazılmadı.
+
+## Kapanış
+
+Değişikliği tespit eden bir araç yazmak görece kolay. Asıl zor olan, aracın kendi
+kayıtlarının değiştirilmediğini kanıtlayabilmesi. Bir güvenlik aracını tasarlarken
+"saldırgan bu aracın kendisine ne yapar?" sorusunu sormak; imzalı baseline,
+zincirli audit log ve veritabanı trigger'ı gibi önlemleri doğal olarak gündeme
+getiriyor.

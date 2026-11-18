@@ -1,32 +1,34 @@
 ---
-title: "Bilgisayar Organizasyonu dersinden bir güneş takip sistemi"
-kisa: Dört ışık sensörüyle güneşin yönünü bulup paneli iki servo motorla en verimli açıya çeviren Arduino prototipi.
-ozet: "Sabit bir güneş paneli güneşe günün yalnızca bir bölümünde dik bakar. Paneli güneşle birlikte döndürsek? Bilgisayar Organizasyonu dersi için bunu iki eksende yapan bir prototip kurdum."
+title: "Arduino ile Çift Eksenli Güneş Takip Sistemi: LDR, Servo ve Jitter Problemi"
+kisa: Dört LDR sensörüyle güneşin yönünü bulup paneli iki servo motorla en verimli açıya çeviren bir Arduino prototipi.
+ozet: "Sabit bir güneş paneli güneşe günün yalnızca bir bölümünde dik bakar. Paneli güneşle birlikte döndürmek aynı panelden daha fazla enerji almanın en doğrudan yolu; prototipte asıl zorluk ise kod değil, servo jitter'ı oldu."
 date: 2026-08-07
-teknolojiler: [Arduino, C++, LDR sensörler, SG90 servo, Seri haberleşme]
+teknolojiler: [Arduino, C++, LDR, SG90 servo, Serial]
 repo: https://github.com/hasancrlk/SolarTrack-Pro
 kategori: donanim
 sira: 10
 ref: solartrack
 ---
 
-SolarTrack Pro paneli hem sağa-sola hem yukarı-aşağı döndürüyor. Kodu kısa,
-ama beni en çok uğraştıran şey kod değil, servo motorların titremesi oldu.
+SolarTrack Pro, Bilgisayar Organizasyonu dersi için geliştirdiğim çift eksenli
+(pan-tilt) bir güneş takip prototipi. Bu yazıda sistemin çalışma prensibini,
+prototipte en çok uğraştıran servo jitter problemini ve çalışma modlarını
+anlatıyorum.
 
-## Kullandığım parçalar
+## Donanım
 
 - Arduino Uno R3
-- 4 adet LDR ışık sensörü (sol, sağ, yukarı, aşağı)
-- LDR'ler için 10K dirençlerle gerilim bölücü
-- 2 adet SG90 mikro servo ve çift eksenli pan-tilt mekanizması
-- 4.2V 100mA güneş paneli, breadboard ve bağlantı kabloları
+- 4 adet LDR (sol, sağ, yukarı, aşağı)
+- LDR'ler için 10K dirençlerle voltage divider
+- 2 adet SG90 micro servo ve pan-tilt mekanizması
+- 4.2V 100mA güneş paneli, breadboard ve jumper kablolar
 
-## Panel güneşi nasıl buluyor?
+## Çalışma prensibi
 
-Dört sensörü panelin dört kenarına yerleştirdim. Güneş tam karşıdayken
-karşılıklı sensörler aynı ışığı görüyor. Güneş kaydıkça bir taraf daha fazla
-ışık alıyor ve panel o tarafa dönüyor. Yatay eksende sol ve sağ sensörlerin
-farkına bakıyorum:
+Dört LDR panelin dört kenarına yerleştirildi. Güneş tam karşıdayken karşılıklı
+sensörler aynı ışık değerini okur. Güneş yer değiştirdikçe bir taraf daha fazla
+ışık alır ve panel o yöne döndürülür. Yatay eksende sol ve sağ sensörlerin farkına
+bakılıyor:
 
 ```cpp
 int yatayFark = sol - sag;
@@ -37,44 +39,47 @@ if (yatayFark > ESIK && yatayAci < YATAY_MAX) {
 }
 ```
 
-Dikey eksende de aynı mantık yukarı ve aşağı sensörlerle çalışıyor.
+Dikey eksende aynı mantık yukarı ve aşağı sensörlerle uygulanıyor.
 
-## Servo titremesi
+## Servo jitter problemi
 
-LDR okumaları hiçbir zaman tam sabit değil, sürekli küçük dalgalanmalar
-gösteriyor. Kod sensörler arasındaki her farka tepki verirse servo, panel
-doğru yerdeyken bile ileri geri oynuyor. Prototipte en çok bununla uğraştım.
+LDR okumaları hiçbir zaman tam sabit değil; sürekli küçük dalgalanmalar (noise)
+gösteriyor. Kod sensörler arasındaki her farka tepki verirse servo, panel doğru
+konumdayken bile ileri geri titriyor. Prototipte en çok zaman alan konu bu oldu.
 
-Kodda buna karşı iki sabit var:
+Kodda bu soruna karşı iki sabit var:
 
-- **Eşik (`ESIK = 30`):** Karşılıklı sensörler arasındaki fark bu değeri
-  geçmedikçe servo kıpırdamıyor. Böylece ölçüm gürültüsü harekete
-  dönüşmüyor.
-- **Adım (`ADIM = 1` derece):** Panel her döngüde yalnızca bir derece
-  dönüyor. Büyük adımlar hedefin etrafında salınıma yol açabilir.
+- **Threshold (`ESIK = 30`).** Karşılıklı sensörler arasındaki fark bu değeri
+  aşmadıkça servo hareket etmiyor; ölçüm noise'u harekete dönüşmüyor.
+- **Step (`ADIM = 1` derece).** Panel her loop'ta yalnızca bir derece dönüyor.
+  Büyük adımlar hedefin etrafında oscillation'a yol açabilir.
 
-Servo açılarını ayrıca 0–180 derece arasında sınırladım ki mekanizma
-zorlanmasın.
+Servo açıları ayrıca 0–180 derece arasında sınırlandırıldı; mekanizma
+zorlanmıyor.
 
-## Hava kapalıysa ne olacak?
+## Çalışma modları ve serial komutlar
 
-Bulutlu havada ışık dağınık geliyor ve sensörler net bir yön göstermiyor;
-gece ise takip edecek bir şey yok. Bu durumlarda panelin rastgele dönmesi
-yerine ortada durmasını tercih ettim. Modları seri porttan komutla
-değiştirebiliyorsunuz:
+Bulutlu havada ışık dağınık geliyor ve sensörler net bir yön göstermiyor; gece
+ise takip edilecek bir kaynak yok. Bu durumlarda panelin rastgele dönmesi yerine
+merkezde kilitlenmesi tercih edildi. Modlar serial port üzerinden komutla
+değiştiriliyor:
 
-- `MODE_SUN`: Aktif takip.
-- `MODE_CLOUD` ve `MODE_NIGHT`: Servolar 90°/90°'de kilitli.
-- `CENTER`: Servoları ortalıyor.
-- `STOP` / `START`: Hareketi durdurup yeniden başlatıyor.
-- `DELAY_<ms>`: Sensör okuma aralığını 10–500 ms arasında ayarlıyor.
+- **`MODE_SUN`.** Aktif takip.
+- **`MODE_CLOUD` / `MODE_NIGHT`.** Servolar 90°/90° konumunda kilitli.
+- **`CENTER`.** Servoları merkeze alır.
+- **`STOP` / `START`.** Hareketi durdurur ya da yeniden başlatır.
+- **`DELAY_<ms>`.** Sensör okuma aralığını 10–500 ms arasında ayarlar.
 
-Kart her döngüde sensör değerlerini ve servo açılarını seri porta yazıyor,
-böylece bu değerler bir arayüzde okunup grafiğe dökülebiliyor.
+Kart her loop'ta sensör değerlerini ve servo açılarını serial porta yazıyor;
+bu çıktı bir dashboard üzerinden okunup grafiğe dökülebiliyor.
 
-## Geliştirilebilecek yönler
+## Kapanış
 
-Şu an modu elle seçiyorsunuz; toplam ışık seviyesine bakıp bulut ve gece
-modunu kendiliğinden seçmek ilk adım olur. Panelin ürettiği gerilimi ölçüp
-sabit bir panelle karşılaştırmak da sistemin ne kadar verim kazandırdığını
-sayıyla gösterir.
+Prototipin geliştirilebilecek iki yönü var: toplam ışık seviyesine bakarak bulut
+ve gece modunun otomatik seçilmesi, ve panelin ürettiği voltajın ölçülüp sabit bir
+panelle karşılaştırılması. İkincisi, sistemin sağladığı verim artışını sayısal
+olarak göstermenin tek yolu.
+
+Yazılımda bir koşul ya doğrudur ya yanlış; sensörlerle çalışırken ise her okuma
+biraz noise içerir. Threshold ve step gibi iki küçük sabit, titreyen bir
+prototiple düzgün çalışan bir sistem arasındaki farkı oluşturuyor.
