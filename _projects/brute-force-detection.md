@@ -1,7 +1,7 @@
 ---
-title: "Forgetful user or bot? Detecting brute-force attacks from auth logs"
+title: "Separating brute-force attacks from forgotten passwords in auth logs"
 kisa: An analysis service that finds password-guessing attacks in SSH and web logs and explains every alert.
-ozet: "I built a service that reads server logs and detects brute-force attacks. Finding the attack was the easy part. The real work was not flagging the employee who forgot their password."
+ozet: "A service that reads SSH and web server login logs and detects brute-force attacks. The focus is on not flagging a user who has simply forgotten their password."
 date: 2026-09-18
 teknolojiler: [Python, FastAPI, SQLAlchemy, PostgreSQL, pytest, Docker]
 repo: https://github.com/hasancrlk/kaba-kuvvet-saldiri-tespiti
@@ -10,128 +10,120 @@ sira: 1
 ref: authwatch
 ---
 
-## The problem
-
-Every login attempt on a server becomes a line in a log file. Open the
-`auth.log` of any SSH server exposed to the internet and you will see lines
-like `Failed password for invalid user admin` several times a minute. Bots are
-knocking on the door all the time.
-
-The rule sounds simple: "alert when one IP fails 5 times within 60 seconds."
-It takes five minutes to write, and it fails in two ways:
-
-1. An attacker can sidestep it easily.
-2. An employee who mistypes their password three or four times also triggers
-   it. After a while nobody looks at the alerts.
-
-This project tries to solve both.
-
-## Hard part 1: A fixed window can be gamed
-
-If you reset a counter every 60 seconds and the threshold is 5, the attacker
-sends 4 attempts at the end of one window and 4 more right after the reset.
+The `auth.log` of an SSH server exposed to the internet looks roughly like
+this:
 
 ```
-window 1                           window 2
-├───────────────────────────┤      ├──────────────────────
-     ✗  ✗  ✗  ✗  (4 tries)          ✗  ✗  ✗  ✗  (4 tries)
-                         ↑ 55 s     ↑ 62 s
-
-fixed window  : 4 tries in each window → NO ALERT
-sliding window: at 62 s, look back 60 s → 8 tries → ALERT
+Sep 17 03:12:01 srv01 sshd[4101]: Failed password for invalid user admin from 203.0.113.5
+Sep 17 03:12:04 srv01 sshd[4102]: Failed password for invalid user oracle from 203.0.113.5
+Sep 17 03:12:07 srv01 sshd[4103]: Failed password for root from 203.0.113.5
+Sep 17 03:12:10 srv01 sshd[4104]: Failed password for invalid user postgres from 203.0.113.5
 ```
 
-The fix is a **sliding window**. I keep a `deque` per IP and drop events that
-fall out of the window whenever a new failure arrives:
+The same IP, three seconds apart, a different username each time. This is
+clearly a bot probing the door. The same file also contains these lines:
+
+```
+Sep 17 09:42:10 srv01 sshd[5210]: Failed password for deniz from 198.51.100.7
+Sep 17 09:42:16 srv01 sshd[5211]: Failed password for deniz from 198.51.100.7
+Sep 17 09:42:41 srv01 sshd[5212]: Failed password for deniz from 198.51.100.7
+```
+
+That is most likely an employee trying to remember a password. Telling the
+two apart is a well-known problem in the industry: a system that alerts on
+every failed login is soon drowned in noise and its alerts stop being read. I
+built this project around that problem as one of the assignments during my
+internship at EMT Cyber.
+
+The lines above come from the sample log in the repository; the IP addresses
+are from ranges reserved for documentation.
+
+## Counting the threshold correctly
+
+The basic rule is "alert if one IP fails 5 times within 60 seconds". If the
+counter is reset every minute, an attacker can stay under the threshold by
+making 4 attempts at the end of one window and 4 at the start of the next.
+Counting is therefore done with a **sliding window**: a `deque` per IP, and
+when a new failure arrives, entries that have fallen out of the window are
+dropped.
 
 ```python
 bucket.append(event)
 while bucket and event.timestamp - bucket[0].timestamp > window:
-    bucket.popleft()          # drop events outside the window
+    bucket.popleft()
 if len(bucket) >= threshold:
     raise_alert()
 ```
 
-Each event enters and leaves the queue once, so the cost is linear. A
-million-line log is processed in a single pass. The attack sequence above is a
-test in the repository.
+Each entry enters and leaves the queue once, so the cost is linear and a
+large log is processed in a single pass. The 4+4 sequence that a fixed window
+misses is a separate test in the repository.
 
-I also added a **cooldown**. Without it, a 500-attempt attack would produce
-496 alerts. The same IP is silenced for 5 minutes after an alert.
+A cooldown prevents an alert for every attempt after the threshold is
+crossed. The default is 300 seconds, during which no new alert is written for
+the same IP.
 
-## Hard part 2: Telling humans from bots
+## Telling a user from a bot
 
-Not every burst over the threshold is an attack. The difference is in the
-**shape** of the attempts:
+Not every burst over the threshold is an attack. The service computes a
+confidence score for each alert based on the shape of the attempts:
 
-| Signal | Human | Bot | Score effect |
-|---|---|---|---:|
-| Distinct usernames tried | 1 | many | 3+ → +0.25, single → −0.15 |
-| Non-existent user (`invalid user`) | no | often | +0.20 |
-| Regularity of the gaps | irregular | clockwork | regular → +0.15 |
-| Multiple of the threshold | low | high | 3× → +0.25 |
-| Earlier successful login from this IP | usually | rarely | −0.20 |
+- **Username variety.** Three or more distinct usernames raise the score; a
+  single username lowers it.
+- **Non-existent users.** `invalid user` lines indicate user enumeration and
+  raise the score.
+- **Regularity of intervals.** The coefficient of variation of the gaps is
+  computed. People retry at irregular intervals; automation is regular.
+- **Intensity.** Three times the threshold or more raises the score.
+- **History.** A previous successful login from the same IP lowers it.
 
-Regularity comes from the **coefficient of variation** of the gaps between
-attempts. A person waits 3 seconds, then 12, then 40. A bot ticks like a
-clock. The total is labelled `high / medium / low`, and every alert explains
-itself in plain sentences. Two real outputs from the sample log in the repo
-(the tool writes its reasons in Turkish; translated here):
-
-```
-203.0.113.5  →  5 usernames, 4 of them non-existent, exactly 3 s apart
-                confidence: high (0.95)
-                "5 distinct usernames tried (user enumeration)."
-                "Attempts came at near-constant intervals (automation)."
-
-198.51.100.7 →  one account, irregular gaps, same IP logged in this morning
-                confidence: low (0.0)
-                "Single username - possibly a user who forgot the password."
-```
-
-Two design decisions. First, **low-confidence alerts are not deleted**, only
-labelled. A system that filters itself can silently swallow a real attack; the
-analyst makes the call. Second, web logs usually carry `-` instead of a
-username. Treating that as "single user" and lowering the score would unfairly
-downgrade a real bot burst. No signal, no discount.
-
-## Account takeover
-
-If one IP fails repeatedly against **the same username** and then logs in
-successfully as that user, that is a separate alert type:
+The result is labelled `high`, `medium` or `low`, and each alert carries the
+reasons behind it as sentences. For the two examples above (the tool writes
+its reasons in Turkish; translated here):
 
 ```
-22:05:00  ✗ hasan    ┐
-  ...                ├─ 6 failures
-22:05:45  ✗ hasan    ┘
-22:05:54  ✓ hasan    ← possible account takeover (confidence: high)
+203.0.113.5   confidence: high (0.95)
+  - 5 distinct usernames tried (user enumeration).
+  - 4 attempts targeted non-existent usernames.
+  - Attempts arrived at near-constant intervals (automation).
+
+198.51.100.7  confidence: low (0.0)
+  - Single username - possibly a user who forgot the password.
+  - This IP has logged in successfully before (known source).
 ```
 
-The username must match. Six attacks on `admin` followed by a normal login as
-`deploy` is not a takeover. Matching it would flag every developer who logs in
-in the morning.
+Low-confidence alerts are not deleted, only labelled. The analyst decides
+what can be ignored; the service only makes triage easier.
 
-## Log parsing
+In web access logs the username is usually `-`. In that case the
+"single username" discount is not applied; otherwise the score of a real bot
+burst would be lowered unfairly.
 
-Three formats are supported: SSH `auth.log`, nginx/apache combined logs and
-JSON lines. Unparseable lines are not thrown away; they are counted and
-samples are stored. Saying "1 of 30 lines could not be read, here it is" beats
-dropping it silently. A small trap: `auth.log` does not write the year
-(`Sep 17 03:12:01`), so the year is passed as a parameter on upload.
+## Success after failures
 
-## What I deliberately left out
+If one IP fails repeatedly against the same username and then logs in
+successfully as that user, the service raises a separate alert:
+`possible_account_takeover`. The username has to match. A normal login as
+`deploy` after an attack on `admin` does not qualify.
 
-- **Distributed attacks are invisible.** Detection is per IP. A botnet making
-  2 attempts from each IP never crosses the threshold. That needs a per-user
-  or per-network (ASN) dimension.
-- **No state between uploads.** An attack split across two files can be cut
-  in half. Real-time streaming would need persistent state.
-- **No proxy awareness.** `X-Forwarded-For` is not read.
+## Supported logs
 
-## What I learned
+SSH `auth.log`, nginx/apache combined logs and JSON lines. Lines that match
+no format are counted and samples are kept, so every upload shows how much
+of the file could not be read. Because `auth.log` timestamps carry no year,
+the year is passed as a parameter on upload.
 
-The value of a detection system is not how many attacks it catches but how
-many of its **alerts are trusted**. Nobody keeps reading a bare "ALERT" line.
-People read the alert that answers "why". The project ships with 48 tests. My
-favourite one shows the sliding window catching the sequence the fixed window
-misses.
+## Out of scope
+
+- **Distributed attacks.** Detection is per IP. A botnet making a few
+  attempts from each IP never reaches the threshold; that needs a per-user or
+  per-network (ASN) dimension.
+- **State across uploads.** Each upload is processed on its own, so an attack
+  split across two files can be cut in half.
+- **Reverse proxies.** `X-Forwarded-For` is not read.
+- **Authentication.** The service itself is open and should run on an
+  internal network or behind a reverse proxy.
+
+The project ships with 48 tests and starts with PostgreSQL via
+`docker compose up`. Since the sample log is in the repository, it can be
+tried right after installation.

@@ -1,7 +1,7 @@
 ---
-title: "Neden threading değil asyncio? Sıfırdan eşzamanlı port tarayıcı"
+title: "nmap kullanıyordum, sonra kendi port tarayıcımı yazdım"
 kisa: Açık TCP portlarını eşzamanlı tarayıp arkadaki servisi banner'dan tahmin eden, izinsiz hedefi reddeden tarayıcı.
-ozet: "nmap'in en çok kullanılan bir dilimini, yani TCP connect taramasını ve banner okumayı, kendi kodumla yazdım. Yazının konusu iki karar: neden asyncio ve araç kendini kötüye kullanıma karşı nasıl korur."
+ozet: "Daha önce nmap ile çalışmıştım. Bu projede onun en çok kullanılan kısmını, TCP connect taramasını ve banner okumayı, asyncio ile sıfırdan yazdım ve araca kötüye kullanıma karşı bir kapsam kapısı ekledim."
 date: 2026-09-18
 teknolojiler: [Python, asyncio, FastAPI, SQLAlchemy, argparse, Docker]
 repo: https://github.com/hasancrlk/port-tarayici
@@ -10,104 +10,93 @@ sira: 4
 ref: portscout
 ---
 
-## Problem
+Bu projeden önce port taramasını nmap üzerinden kullanıcı olarak
+biliyordum. Komutu yazar, çıktıyı okurdum. Aynı işi kendi kodumla yapmak, nmap
+çıktısındaki her kelimenin arkasında hangi ağ davranışı olduğunu görmemi
+sağladı.
 
-Bir sunucudaki her servis bir port üzerinden dinler: SSH 22'den, web 80 ve
-443'ten, PostgreSQL 5432'den. Gereksiz yere açık kalmış bir port içeri girmek
-için bir kapı demek. Port tarayıcı bu kapıları bulur. Amacım `nmap`'in yerini
-almak değildi. Onun en sık kullanılan kısmını sıfırdan yazıp nasıl çalıştığını
-gerçekten anlamaktı.
+PortScout nmap'in yerini almak için değil, onun en sık kullanılan bölümünü
+anlamak için yazıldı: TCP connect taraması ve servislerin kendilerini
+tanıttığı ilk satırın (banner) okunması.
 
 ```
 $ python -m cli scan 127.0.0.1 -p top100
 PORT    DURUM     SERVIS     URUN / BANNER
---------------------------------------------------------------
 22      open      ssh        OpenSSH/SSH: OpenSSH_9.6
 ```
 
-## Karar 1: Neden asyncio?
+## Eşzamanlılık modeli
 
-Port taraması neredeyse tamamen **bekleme** işi. Açılan soket ya el sıkışır ya
-da zaman aşımı dolana kadar boşta durur. İşlemci neredeyse hiç çalışmaz.
+Port taraması büyük ölçüde beklemekten ibarettir. Her bağlantı ya el
+sıkışmayı tamamlar ya da zaman aşımı dolana kadar cevap bekler; işlemci bu
+sürede neredeyse hiç çalışmaz. Bu iş yükü için `asyncio` seçildi.
 
-| | Thread havuzu | asyncio |
-|---|---|---|
-| Görev başına maliyet | ~1 MB yığın | ~1 KB |
-| 5.000 port | Havuz 50–200'de kalır | 5.000 coroutine sorunsuz |
-| Zaman aşımı | `future.result(timeout=)` thread'i **bırakmaz** | `asyncio.wait_for` görevi gerçekten iptal eder |
+Belirleyici olan, zaman aşımının nasıl ele alındığı. Bir thread havuzunda
+`future.result(timeout=...)` beklemeyi bırakır ama iş parçacığını serbest
+bırakmaz; bağlantı işletim sistemi tarafından kapatılana kadar havuzda yer
+tutmaya devam eder. Cevap vermeyen bir hostta bu durum havuzu hızla doldurur.
+`asyncio.wait_for` ise coroutine'i iptal eder ve yer hemen boşalır.
 
-Son satır belirleyici oldu. Thread havuzunda zaman aşımına düşen bir bağlantı,
-işletim sistemi soketi kapatana kadar havuzda bir yeri işgal etmeye devam
-eder. Cevap vermeyen (filtrelenmiş) bir hostta bu, havuzun tamamen tıkanması
-demek ve taramada en sık karşılaşılan durum tam olarak bu. `asyncio.wait_for`
-ise coroutine'i iptal ediyor ve yer anında boşalıyor.
+Eşzamanlılık sınırsız bırakılmadı. `asyncio.Semaphore` olmadan binlerce
+bağlantı aynı anda açılmaya çalışır: yerel tarafta dosya tanıtıcısı sınırına
+takılır, karşı tarafta ise bir SYN selini andırır. Varsayılan değer 200
+eşzamanlı bağlantı ve `--concurrency` ile değiştirilebiliyor.
 
-Kaba bir ölçüm: cevap vermeyen bir hostta 1.000 port, 1 sn zaman aşımı ve 200
-eşzamanlı bağlantıyla yaklaşık **5 saniye**. Seri olarak yaklaşık 1.000
-saniye sürerdi.
+Yaklaşık bir ölçüm vermek gerekirse: cevap vermeyen bir hostta 1.000 port,
+1 saniye zaman aşımı ve 200 eşzamanlı bağlantıyla tarama 5 saniye civarında
+tamamlanıyor.
 
-**Neden sınırsız değil?** `Semaphore` olmadan 65.535 bağlantı aynı anda
-başlar. Yerelde `too many open files` hatası alırsınız. Karşı tarafta ise bu
-bir SYN selini andırır, yani araç kazara bir hizmet engelleme saldırısına
-dönüşür. Varsayılan 200 eşzamanlı bağlantı.
+## Üç port durumu
 
-## Üç durum: open, closed, filtered
+Tarayıcı her port için üç durumdan birini raporluyor:
 
-Basit tarayıcılar "açık değilse kapalı" der. Bu bilgi kaybı:
+- **open:** TCP el sıkışması tamamlandı, port dinleniyor.
+- **closed:** Karşı taraf `RST` gönderdi. Host ayakta ama bu portta servis yok.
+- **filtered:** Hiç cevap gelmedi. Arada bir güvenlik duvarı olabilir ya da
+  host kapalı olabilir.
 
-| Durum | Ne oldu | Anlamı |
-|---|---|---|
-| open | El sıkışma tamamlandı | Port dinleniyor |
-| closed | `RST` geldi | **Host ayakta**, o portta servis yok |
-| filtered | Hiç cevap yok | Arada güvenlik duvarı var ya da host kapalı |
-
-Bir hostun bütün portları `filtered` dönüyorsa araç "hepsi kapalı" demiyor,
-"host'a ulaşılamadı" notu düşüyor.
+`closed` ile `filtered` arasındaki fark keşif açısından anlamlıdır. Bütün
+portlar `filtered` dönerse araç "hepsi kapalı" demek yerine host'a
+ulaşılamadığını belirten bir not ekliyor.
 
 ## Banner okuma
 
-SSH, SMTP ve FTP gibi servisler bağlantı kurulur kurulmaz kendini tanıtan bir
-satır gönderir. Yalnızca okumak yeterli. HTTP ise önce istek bekler, bu yüzden
-bilinen web portlarına küçük bir `HEAD /` isteği gidiyor. Gönderilen tek şey
-bu. Araç hiçbir zaman istismar denemesi yapmıyor.
+SSH, SMTP ve FTP gibi servisler bağlantı kurulduğunda kendini tanıtan bir
+satır gönderir; bu satırı okumak yeterlidir. HTTP ise istek bekler; bilinen
+web portlarına yalnızca `HEAD /` isteği gönderiliyor. Okunan metin bir eşleme
+tablosuyla ürüne çevriliyor (OpenSSH, Postfix, nginx, Redis gibi). Araç hiçbir
+koşulda istismar denemesi yapmıyor.
 
-Gözden kaçabilecek bir ayrıntı: banner ekrana basılmadan önce **kontrol
-karakterlerinden temizleniyor**. Ham banner'ı terminale yazmak, ANSI kaçış
-dizileri gönderen kötü niyetli bir sunucunun terminal çıktınızı ve log
-dosyanızı değiştirebilmesi demek.
+Banner metni ekrana yazılmadan önce kontrol karakterlerinden arındırılıyor.
+Ham metin doğrudan terminale basılsaydı, ANSI kaçış dizileri gönderen bir
+sunucu terminal çıktısını ve log dosyasını değiştirebilirdi.
 
-## Karar 2: Araç kendini nasıl korur?
+## Kapsam kapısı
 
-İzinsiz port taraması Türkiye'de suç olabilir. Bunu README'ye yazıp geçmek
-yerine koda koydum: **varsayılan ayarda internetteki hiçbir hedef
+İzinsiz port taraması Türk Ceza Kanunu kapsamında suç teşkil edebilir. Bu
+nedenle kural yalnızca README'de bir uyarı olarak bırakılmadı, koda
+yerleştirildi: **varsayılan yapılandırmada internetteki hiçbir hedef
 taranamıyor.**
 
-```
-hedef → IP'ye çözümle
-  ├─ ad izin listesinde mi?      ─┐
-  ├─ IP yerel/özel ağda mı?      ─┼─ evet → TARA
-  └─ SCAN_ALLOW_PUBLIC=true mu?  ─┘
-                         hayır → 403 / çıkış kodu 3
-```
+Bir hedefin taranabilmesi için şu koşullardan biri sağlanmalı:
 
-Üç ayrıntı bilinçli:
+1. Hedefin adı izin listesinde (`SCAN_ALLOWLIST`) olmalı.
+2. Hedef yerel ya da özel bir IP adresine çözülmeli.
+3. `SCAN_ALLOW_PUBLIC=true` olarak bilinçli şekilde açılmış olmalı.
 
-1. **Hem ad hem IP kontrol ediliyor.** Yalnızca ada bakmak, iç ağdaki bir
-   IP'ye çözülen bir alan adıyla atlatılabilirdi.
-2. **Kapı tarama motorunun önünde.** CLI de API de aynı servis katmanından
-   geçiyor. `curl` ile doğrudan API çağrılsa da aynı denetim çalışıyor.
-3. **Açmak bilinçli bir eylem.** `.env` dosyasında yanındaki yorum yazılı
-   izin hatırlatması yapıyor.
+Kontrol hem alan adı hem çözülen IP üzerinden yapılıyor. Kapı tarama
+motorunun önünde duruyor; komut satırı ve REST API aynı servis katmanından
+geçtiği için API'ye doğrudan istek gönderen biri de aynı kontrolle
+karşılaşıyor. Kapsam dışı hedef komut satırında 3 çıkış koduyla, API'de 403
+ile reddediliyor.
 
-## Bilerek yapmadıklarım
+## Bilinçli olarak eklenmeyenler
 
-Yalnızca TCP connect taraması var. SYN taraması yönetici yetkisi ister ve
-connect taraması hedefin loglarına tam bağlantı olarak düşer, yani gürültülü.
-UDP yok, TLS el sıkışması yok. `nmap -T0` gibi saldırı tespit sistemlerinden
-kaçma profillerini **bilerek** eklemedim.
+- **SYN taraması:** Ham soket ve yönetici yetkisi gerektirir.
+- **UDP taraması:** Anlamlı sonuç için servise özel paketler gerekir.
+- **TLS el sıkışması:** 443 açık görünür, sertifika bilgisi okunmaz.
+- **Zamanlama profilleri:** nmap'teki `-T0` gibi tespit atlatmaya yönelik
+  profiller eklenmedi.
 
-## Öğrendiklerim
-
-"Neden asyncio?" sorusunun cevabını tablodan değil zaman aşımı davranışından
-öğrendim. İkinci büyük ders: bir saldırı aracının etik sınırı belgede değil
-kodda durmalı. Kullanıcı README okumaz ama kapıya takılır.
+Proje 38 testle birlikte geliyor. Sonuçlar SQLite ya da PostgreSQL'e
+kaydediliyor ve geçmiş taramalar `python -m cli list` ile listelenebiliyor.

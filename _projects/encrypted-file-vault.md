@@ -1,7 +1,7 @@
 ---
-title: "A file vault that never stores the password: AES-256-GCM and Argon2id in practice"
+title: "Encrypting files without storing the password"
 kisa: An API service that encrypts files with a password and supports one-time and time-limited downloads.
-ozet: "I built a service that encrypts and stores files with a password. Even if the server's disk is stolen, nobody without the password can open them. This post covers why I picked these algorithms and what the service does not promise."
+ozet: "An API service that encrypts files with a password and offers one-time and expiring download links. This post covers the algorithms and parameters chosen, and what the service does not promise."
 date: 2026-09-17
 teknolojiler: [Python, FastAPI, cryptography, Argon2id, PostgreSQL, Docker]
 repo: https://github.com/hasancrlk/sifreli-dosya-kasasi
@@ -10,12 +10,13 @@ sira: 3
 ref: vaultcore
 ---
 
-## The problem
+The most common way to share a sensitive file is to attach it to an email,
+and the biggest drawback is that it then sits unencrypted on a server for
+years. This service was written to meet three requirements together:
 
-You want to send someone a sensitive file: a contract, a copy of an ID. Attach
-it to an email and it sits on a server for years. What I wanted: the file is
-**encrypted with a password**, it **expires after one download or 24 hours**,
-and it stays unreadable even if the server's disk is compromised.
+- Files are written to disk only in encrypted form.
+- The password is never stored anywhere.
+- A file becomes inaccessible after a set number of downloads or a set time.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/vault/upload \
@@ -24,22 +25,12 @@ curl -X POST http://localhost:8000/api/v1/vault/upload \
   -F "max_downloads=1" -F "expires_in_hours=24"
 ```
 
-## The flow
+## The encryption flow
 
-```
-Password ──► Argon2id (64 MB, 3 passes) ◄── 16-byte random salt
-                 │
-                 ▼
-          256-bit key ──► AES-256-GCM ◄── 12-byte random nonce
-                              │
-                              ▼
-               ciphertext + 16-byte authentication tag
-                   │                       │
-              .enc on disk          salt, nonce in the database
-                                    (the password NEVER)
-```
-
-The core is short:
+The password is first turned into a 256-bit key with Argon2id. That key
+encrypts the file with AES-256-GCM. Each file gets its own salt (16 bytes)
+and nonce (12 bytes). The database stores the salt, the nonce and file
+metadata; it never stores the password or the key.
 
 ```python
 def encrypt(plaintext: bytes, password: str, aad: bytes | None = None):
@@ -51,55 +42,60 @@ def encrypt(plaintext: bytes, password: str, aad: bytes | None = None):
     return EncryptionResult(ciphertext=ciphertext, salt=salt, nonce=nonce, params=params)
 ```
 
-## Why AES-GCM?
+### Why AES-GCM?
 
-AES-GCM gives confidentiality and integrity in one operation (AEAD). With
-AES-CBC I would have to add a MAC myself and get the order right, which is
-exactly where implementation bugs live. GCM has no padding, so it is immune to
-padding-oracle attacks by design, and modern CPUs accelerate it (AES-NI).
+AES-GCM is an AEAD mode that provides confidentiality and integrity in one
+operation. With AES-CBC a MAC would have to be added separately and applied
+in the right order, a step that is prone to implementation errors. GCM uses
+no padding, so it is not affected by padding-oracle attacks, and it is
+hardware-accelerated on modern CPUs.
 
-Its one big danger is **reusing a nonce**, which breaks both confidentiality
-and integrity. That is why every file gets a fresh nonce from `os.urandom`.
+The one point that needs care is never reusing a nonce with the same key.
+The service generates a fresh nonce with `os.urandom` for every encryption.
 
-## Why Argon2id instead of the password itself?
+### Why Argon2id?
 
-Human passwords have low entropy. Using one directly as a key would let an
-attacker try billions of guesses per second. Argon2id needs 64 MB of memory
-for every derivation. Memory is scarce on GPUs, so parallel guessing becomes
-far more expensive. With these settings one derivation takes about 250 ms.
+User passwords have low entropy. Used directly as a key, a password allows an
+attacker to try a very large number of guesses very quickly. Argon2id uses a
+large amount of memory for every derivation (64 MB, 3 passes, 4 threads in
+this project). Because memory is limited on GPUs, the cost of parallel
+guessing rises considerably.
 
-Argon2 parameters are stored **per file**. If I strengthen the settings
-tomorrow, old files still open with their original parameters.
+Argon2 parameters are stored with each file, so strengthening them later
+does not break older files.
 
-## Small but important decisions
+## Implementation details
 
 - **The file ID is bound to the ciphertext.** It goes into AES-GCM's
-  associated data (AAD). Swapping two files' ciphertexts in the database
-  fails the authentication tag.
-- **Errors are indistinguishable.** "Wrong password" and "corrupted data"
-  return the same response. Different answers would leak information.
-- **Two layers of rate limiting.** 5 attempts per minute per IP, and a file
-  is locked for 15 minutes after 5 wrong passwords. The second layer also
-  stops distributed guessing from many IPs.
-- **Race-free download counter.** If two requests hit a one-time link at the
-  same moment, only one wins. The counter is incremented atomically.
-- **Memory exhaustion guards.** Uploads are read in chunks and the number of
-  concurrent key derivations is capped. Otherwise 64 MB derivations would
-  take the server down easily.
+  associated data (AAD). If the ciphertexts of two files are swapped in the
+  database, authentication fails.
+- **Errors are indistinguishable.** A wrong password and corrupted data
+  produce the same response, so no extra information leaks.
+- **Two layers of rate limiting.** 5 download attempts per minute per IP,
+  and a file is locked for 15 minutes after 5 wrong passwords. The second
+  layer also works against attempts from many IPs.
+- **Atomic download counter.** Of two simultaneous requests to a one-time
+  link, only one succeeds.
+- **Bounded resource use.** Uploads are read in chunks and the number of
+  concurrent key derivations is capped.
+- **Cleanup.** Encrypted data of expired, exhausted or deleted files is also
+  removed from disk.
 
-## What it does not promise
+## What the service does not promise
 
-For a while the GitHub description said "zero-knowledge". That was wrong and
-I corrected it. Encryption happens **on the server**, so the server sees the
-password and the plaintext during the request. True end-to-end privacy needs
-client-side encryption. The service is also protected by a single API key,
-there is no per-user authorisation, and TLS should come from a reverse proxy
-(nginx/Caddy).
+For a while the repository's GitHub description said "zero-knowledge". That
+was not accurate and was corrected. Encryption happens on the server, so the
+server sees the password and the plaintext for the duration of the request.
+End-to-end privacy requires client-side encryption.
 
-## What I learned
+In addition:
 
-Choosing the algorithm is the small part of cryptography. The real work is
-handling the salt, the nonce, the parameters and the error messages correctly.
-And stating the promise correctly: "zero-knowledge" sounded good but was
-false. In a security product, an overstated claim does more harm than a
-missing feature.
+- The service is protected by a single API key; there is no per-user
+  authorisation.
+- TLS must come from a reverse proxy in front of it (nginx, Caddy).
+- Python offers no reliable way to wipe a key from memory.
+- Deleted files are not securely wiped from disk.
+
+For a security service, documenting what it does not protect matters as much
+as documenting what it does. That is why this section also has its own
+heading in the README.

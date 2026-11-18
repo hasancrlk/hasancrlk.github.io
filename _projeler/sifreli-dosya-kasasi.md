@@ -1,7 +1,7 @@
 ---
-title: "Parolası saklanmayan dosya kasası: AES-256-GCM ve Argon2id pratikte"
+title: "Parolayı saklamadan dosya şifrelemek"
 kisa: Dosyaları parolayla şifreleyip saklayan, tek kullanımlık ve süreli indirme destekleyen API servisi.
-ozet: "Dosyaları parolayla şifreleyip saklayan bir servis yazdım. Sunucunun diski çalınsa bile parolayı bilmeyen kimse dosyayı açamıyor. Bu yazıda neden bu algoritmaları seçtiğimi ve neyi vaat etmediğimi anlatıyorum."
+ozet: "Dosyaları parolayla şifreleyen, tek kullanımlık ve süreli indirme bağlantıları sunan bir API servisi. Yazıda seçilen algoritmaları, parametreleri ve servisin neyi vaat etmediğini ele alıyorum."
 date: 2026-09-17
 teknolojiler: [Python, FastAPI, cryptography, Argon2id, PostgreSQL, Docker]
 repo: https://github.com/hasancrlk/sifreli-dosya-kasasi
@@ -10,13 +10,14 @@ sira: 3
 ref: vaultcore
 ---
 
-## Problem
+Hassas bir dosyayı paylaşmanın en yaygın yolu e-postaya eklemek, en büyük
+sakıncası da dosyanın yıllarca bir sunucuda açık hâlde kalması. Bu servis üç
+şartı birlikte sağlamak için yazıldı:
 
-Hassas bir dosyayı birine göndermek istiyorsunuz: bir sözleşme, bir kimlik
-fotokopisi. E-postaya eklerseniz yıllarca bir sunucuda durur. İstediğim şey
-şuydu: dosya **parolayla şifrelensin**, **bir kez indirilince ya da 24 saat
-sonra** kendiliğinden kapansın ve sunucunun diski ele geçirilse bile dosya
-okunamasın.
+- Dosya diske yalnızca şifreli olarak yazılmalı.
+- Parola hiçbir yerde saklanmamalı.
+- Dosya belirli sayıda indirildikten ya da belirli bir süre geçtikten sonra
+  kendiliğinden erişilemez hâle gelmeli.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/vault/upload \
@@ -25,22 +26,12 @@ curl -X POST http://localhost:8000/api/v1/vault/upload \
   -F "max_downloads=1" -F "expires_in_hours=24"
 ```
 
-## Akış
+## Şifreleme akışı
 
-```
-Parola ──► Argon2id (64 MB, 3 tur) ◄── 16 bayt rastgele tuz
-               │
-               ▼
-        256 bit anahtar ──► AES-256-GCM ◄── 12 bayt rastgele nonce
-                                │
-                                ▼
-                 şifreli veri + 16 bayt doğrulama etiketi
-                     │                      │
-                 diskte .enc         veritabanında tuz, nonce
-                                     (parola ASLA yok)
-```
-
-Kodun kalbi kısa:
+Parola önce Argon2id ile 256 bitlik bir anahtara dönüştürülüyor. Bu anahtar
+AES-256-GCM ile dosyayı şifrelemek için kullanılıyor. Her dosya için ayrı bir
+tuz (16 bayt) ve ayrı bir nonce (12 bayt) üretiliyor. Veritabanına tuz, nonce
+ve dosya bilgileri yazılıyor; parola ve anahtar yazılmıyor.
 
 ```python
 def encrypt(plaintext: bytes, password: str, aad: bytes | None = None):
@@ -52,59 +43,61 @@ def encrypt(plaintext: bytes, password: str, aad: bytes | None = None):
     return EncryptionResult(ciphertext=ciphertext, salt=salt, nonce=nonce, params=params)
 ```
 
-## Neden AES-GCM?
+### Neden AES-GCM?
 
-AES-GCM hem gizliliği hem bütünlüğü tek işlemde sağlıyor (AEAD). AES-CBC
-kullansaydım ayrıca bir MAC eklemem ve sırasını doğru kurmam gerekirdi. Bu
-tam da uygulama hatalarının çıktığı yer. GCM'de dolgu (padding) olmadığı
-için padding oracle saldırılarına da doğası gereği bağışık. Modern
-işlemcilerde donanım hızlandırması (AES-NI) var.
+AES-GCM, gizlilik ve bütünlüğü tek işlemde sağlayan bir AEAD kipidir.
+AES-CBC kullanılsaydı ayrıca bir MAC eklemek ve doğru sırayla uygulamak
+gerekirdi; bu adım uygulama hatalarına açıktır. GCM dolgu (padding)
+kullanmadığı için padding oracle saldırılarından etkilenmez ve modern
+işlemcilerde donanım desteğiyle çalışır.
 
-Tek büyük tehlikesi **aynı nonce'u iki kez kullanmak**. Bu hem gizliliği hem
-bütünlüğü bozar. Bu yüzden her dosya için `os.urandom` ile yeni bir nonce
-üretiliyor.
+Kipin dikkat gerektiren tek noktası aynı anahtarla aynı nonce'un iki kez
+kullanılmaması. Servis bu nedenle her şifrelemede `os.urandom` ile yeni bir
+nonce üretiyor.
 
-## Neden doğrudan parola değil de Argon2id?
+### Neden Argon2id?
 
-İnsanların parolaları düşük entropili. Parolayı doğrudan anahtar olarak
-kullanmak saldırgana saniyede milyarlarca deneme imkânı verir. Argon2id her
-anahtar türetmede 64 MB bellek istiyor. Bellek GPU'larda kıt olduğu için
-paralel deneme maliyeti katlanarak artıyor. Bu ayarlarla bir türetme yaklaşık
-250 ms sürüyor.
+Kullanıcı parolalarının entropisi düşüktür. Parola doğrudan anahtar olarak
+kullanılırsa saldırgan çok kısa sürede çok sayıda tahmin deneyebilir.
+Argon2id her türetmede yüksek miktarda bellek kullanır (bu projede 64 MB, 3
+tur, 4 iş parçacığı). Bellek GPU'larda kısıtlı olduğundan paralel tahmin
+maliyeti belirgin biçimde artar.
 
-Argon2 parametreleri **dosya başına** saklanıyor. Yarın ayarları
-güçlendirirsem eski dosyalar bozulmuyor, eski parametreleriyle açılıyor.
+Argon2 parametreleri her dosyayla birlikte saklanıyor. Parametreler ileride
+güçlendirildiğinde eski dosyalar kendi parametreleriyle açılmaya devam ediyor.
 
-## Küçük ama önemli kararlar
+## Uygulamadaki ayrıntılar
 
-- **Dosya kimliği şifrelemeye bağlı.** Kimlik, AES-GCM'nin "ek doğrulanmış
-  veri" (AAD) alanına giriyor. Veritabanında iki dosyanın şifreli verisini yer
-  değiştiren biri doğrulama etiketine takılıyor.
-- **Hata mesajları ayırt edilemez.** "Yanlış parola" ile "bozuk veri" aynı
-  cevabı veriyor. Ayrı cevap vermek saldırgana bilgi sızdırırdı.
-- **İki katmanlı deneme sınırı.** IP başına dakikada 5 deneme. Bunun yanında
-  aynı dosyaya 5 yanlış parola girilirse dosya 15 dakika kilitleniyor. İkinci
-  katman, farklı IP'lerden gelen dağıtık denemelere karşı da çalışıyor.
-- **İndirme sayacı yarışa dayanıklı.** Tek kullanımlık bir bağlantıya aynı
-  anda iki istek gelirse yalnızca biri kazanıyor. Sayaç atomik olarak
-  artırılıyor.
-- **Bellek tüketimine karşı önlem.** Yükleme parça parça okunuyor ve aynı anda
-  çalışan anahtar türetme sayısı sınırlı. Aksi halde 64 MB'lık türetmeler
-  sunucuyu kolayca tüketirdi.
+- **Dosya kimliği şifreli veriye bağlı.** Kimlik, AES-GCM'nin ek doğrulanmış
+  veri (AAD) alanına giriyor. Veritabanında iki dosyanın şifreli içeriği yer
+  değiştirilirse doğrulama başarısız oluyor.
+- **Hata mesajları ayırt edilemiyor.** Yanlış parola ve bozulmuş veri aynı
+  yanıtı veriyor; böylece dışarıya ek bilgi sızmıyor.
+- **İki katmanlı deneme sınırı.** IP başına dakikada 5 indirme denemesi
+  yapılabiliyor. Aynı dosyaya 5 yanlış parola girildiğinde dosya 15 dakika
+  kilitleniyor; bu ikinci katman farklı IP'lerden gelen denemelere karşı da
+  çalışıyor.
+- **İndirme sayacı atomik.** Tek kullanımlık bir bağlantıya aynı anda gelen
+  iki istekten yalnızca biri başarılı oluyor.
+- **Kaynak tüketimi sınırlı.** Yüklemeler parça parça okunuyor ve aynı anda
+  çalışan anahtar türetme sayısı sınırlandırılıyor.
+- **Temizlik.** Süresi dolan, indirme hakkı biten ya da silinen dosyaların
+  şifreli verisi diskten de kaldırılıyor.
 
-## Neyi vaat etmiyorum
+## Servisin vaat etmedikleri
 
-Reponun GitHub açıklamasında bir süre "zero-knowledge" yazıyordu. Doğru
-değildi, düzelttim.
-Şifreleme **sunucuda** yapılıyor, yani sunucu istek süresince parolayı ve
-dosyanın açık hâlini görüyor. Gerçek uçtan uca gizlilik için şifrelemenin
-istemcide yapılması gerekir. Ayrıca servis tek bir API anahtarıyla
-korunuyor, kullanıcı bazlı yetkilendirme yok ve TLS bir ters vekil
-(nginx/Caddy) üzerinden sağlanmalı.
+Reponun GitHub açıklamasında bir süre "zero-knowledge" ifadesi yer alıyordu.
+Bu ifade doğru değildi ve düzeltildi. Şifreleme sunucuda yapıldığı için
+sunucu, istek süresince parolayı ve dosyanın açık hâlini görüyor. Uçtan uca
+gizlilik için şifrelemenin istemci tarafında yapılması gerekir.
 
-## Öğrendiklerim
+Bunun dışında:
 
-Kriptografide algoritma seçmek işin küçük kısmı. Asıl iş tuzu, nonce'u,
-parametreleri ve hata mesajlarını doğru yönetmek. Bir de vaadi doğru yazmak:
-"zero-knowledge" demek kulağa iyi geliyordu ama yanlıştı. Bir güvenlik
-ürününde abartılı bir iddia, eksik bir özellikten daha zararlı.
+- Servis tek bir API anahtarıyla korunuyor; kullanıcı bazlı yetkilendirme yok.
+- TLS, önüne konacak bir ters vekil (nginx, Caddy) ile sağlanmalı.
+- Python'da anahtarın bellekten güvenilir biçimde silinmesi mümkün değil.
+- Silinen dosyalar için güvenli disk silme (secure wipe) uygulanmıyor.
+
+Bir güvenlik servisinin belgesinde neyi korumadığının açıkça yazılması,
+neyi koruduğunun yazılması kadar önemli. Bu bölüm o yüzden README'de de
+ayrı bir başlık olarak duruyor.

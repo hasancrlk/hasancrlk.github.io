@@ -1,7 +1,7 @@
 ---
-title: "Hız mı, nezaket mi? Alt alan adı keşfinde sessiz eksik sonuç tuzağı"
+title: "Alt alan adı keşfinde hız sınırı ve wildcard DNS"
 kisa: Bir alan adının altındaki alt alan adlarını DNS ile bulan, hızı sınırlayan ve wildcard sahte sonuçlarını eleyen araç.
-ozet: "Bir alan adının altındaki admin., vpn., test. gibi alt alan adlarını bulan bir araç yazdım. En ilginç sorun beklemediğim yerden çıktı: araç fazla hızlıysa hata vermiyor, sessizce eksik sonuç veriyor."
+ozet: "Bir alan adının altındaki admin., vpn., test. gibi alt alan adlarını DNS sorgularıyla bulan bir araç. Yazının odağında iki konu var: hız sınırının sonuçların doğruluğunu nasıl etkilediği ve wildcard DNS'in ürettiği sahte sonuçlar."
 date: 2026-09-18
 teknolojiler: [Python, asyncio, dnspython, FastAPI, SQLAlchemy, Docker]
 repo: https://github.com/hasancrlk/alt-alan-adi-kesif-araci
@@ -10,16 +10,21 @@ sira: 5
 ref: subhound
 ---
 
-## Problem
+Wildcard DNS kaydıyla ilk olarak Bilgisayar Ağları dersinde tanıştım. O
+zaman bir yapılandırma ayrıntısı gibi görünüyordu. Bu projede, bir keşif
+aracının sonuçlarını tamamen anlamsız hâle getirebilecek bir etken olarak
+karşıma çıktı.
 
-Bir kurumun yalnızca `sirket.com` adresi yoktur. Zamanla `admin.sirket.com`,
-`vpn.sirket.com`, `test.sirket.com` gibi onlarca alt alan adı birikir ve bir
-kısmı unutulur. Kimsenin güncellemediği bir test sunucusu internete açık
-kalır. Saldırganların keşif aşaması tam olarak bu adları bulmakla başlar.
-Savunan taraf da aynı listeyi kendisi çıkarmalı.
+## Aracın amacı
 
-Yöntem basit: 300'den fazla yaygın etiketi (`admin`, `api`, `mail`…)
-`<etiket>.sirket.com` hâline getirip DNS'e sormak.
+Kurumların ana alan adının altında zamanla çok sayıda alt alan adı birikir:
+`admin.`, `vpn.`, `test.`, `api.` gibi. Bunların bir kısmı unutulur ve
+güncellenmeyen sunucular erişilebilir kalır. Saldırı yüzeyinin çıkarılması bu
+adların bulunmasıyla başlar. Bug bounty programlarında ve CTF'lerde de keşif
+aşamasının ilk adımı genellikle budur.
+
+Araç, gömülü listedeki 300'den fazla yaygın etiketi `<etiket>.alanadi.com`
+biçimine getirip A, AAAA ve CNAME kayıtlarını sorguluyor:
 
 ```
 $ python -m cli enumerate example.com
@@ -28,76 +33,66 @@ Bulunan      : 4 aktif (12 wildcard elendi)
    api.example.com      A       93.184.216.35
 *  admin.example.com    A       93.184.216.36
    mail.example.com     CNAME   ghs.googlehosted.com
+   www.example.com      A       93.184.216.34
 ```
 
-## Zor kısım: İki ayrı ayar
+## Hız sınırı neden doğrulukla ilgili
 
-Binlerce DNS sorgusunu hem hızlı yürütmek hem çözümleyiciyi boğmamak
-gerekiyor. Kilit nokta bunun **iki ayrı** soru olduğunu görmekti:
+Binlerce sorgunun hızlı yürütülmesi için `asyncio` kullanılıyor. Burada iki
+ayrı ayar var:
 
-| Soru | Araç | Varsayılan |
-|---|---|---|
-| Aynı anda kaç sorgu uçsun? | `asyncio.Semaphore` | 50 |
-| Saniyede kaç sorgu geçsin? | Token bucket | 100/sn |
+- **Eşzamanlılık:** Aynı anda kaç sorgunun beklemede olacağı.
+  `asyncio.Semaphore` ile sınırlanıyor, varsayılan 50.
+- **Hız:** Saniyede kaç sorgunun gönderileceği. Token bucket ile
+  sınırlanıyor, varsayılan saniyede 100.
 
-Yalnızca eşzamanlılığı sınırlamak yetmiyor. 50 eşzamanlı sorgunun her biri 5 ms
-sürerse saniyede 10.000 sorgu eder. Çoğu açık DNS çözümleyicisi bu hızda sizi
-kısıtlar ve **kısıtlama sessizdir**. `SERVFAIL` ya da `REFUSED` dönen sorgular
-kodda "bulunamadı" gibi görünür. Tarama biter, liste kısa çıkar ve kimse bir
-şeyin ters gittiğini anlamaz. Hata veren bir araç, sessizce eksik sonuç veren
-araçtan çok daha az tehlikeli.
+Yalnızca eşzamanlılığı sınırlamak yetmiyor. 50 sorgunun her biri birkaç
+milisaniye sürerse saniyedeki sorgu sayısı binlerce olur. Açık DNS
+çözümleyicilerinin çoğu bu hızda istemciyi kısıtlar ve bunu hata vererek
+değil, `SERVFAIL` ya da `REFUSED` döndürerek yapar. Kodda bu cevaplar "kayıt
+bulunamadı" ile aynı görünür. Sonuç olarak tarama hatasız tamamlanır ama
+liste eksik çıkar.
 
-### Neden token bucket?
-
-`sleep(1/hız)` ile sabit aralıklı beklemek basit ama katı. Token bucket kısa
-patlamalara izin veriyor ve uzun vadede ortalamayı koruyor. Çözümleyiciler de
-tipik olarak saniyelik ortalamaya baktığı için DNS'e uygun davranış bu.
+Token bucket, sabit aralıklı beklemeye göre kısa ani yüklere izin verirken
+uzun vadeli ortalamayı korur. Bekleme işlemi kilidin dışında yapılıyor;
+böylece yavaş bir görev kuyruğun tamamını durdurmuyor.
 
 ```python
 self._tokens = min(capacity, self._tokens + gecen_sure * rate)
 ```
 
-Bekleme kilidin **dışında** yapılıyor. Kilidi tutarak beklemek, tek bir yavaş
-görevin bütün kuyruğu durdurması demekti.
+## Wildcard DNS
 
-## Wildcard DNS: 300 sahte "bulundu"
+Bir alan adı `*.example.com` için kayıt tanımlamışsa, var olmayan her isim de
+cevap döner. Bunu fark etmeyen bir araç listedeki her kelime için "bulundu"
+raporlar.
 
-Bazı alan adları `*.sirket.com` için bir kayıt tanımlar. Böyle bir alanda
-**her** sorgu cevap döner. Bunu fark etmeyen araç 300 satırlık listeden 300
-"bulundu" üretir ve hepsi çöptür.
+Araç taramaya başlamadan önce rastgele üretilmiş üç isim sorguluyor
+(`subhound-<16 hex>.example.com`). Üçü de cevap veriyorsa alanda wildcard
+olduğu kabul ediliyor ve dönen IP kümesi kaydediliyor. Taramada IP kümesi bu
+kümeyle **birebir** aynı olan sonuçlar wildcard olarak işaretleniyor.
 
-```
-1. Rastgele 3 isim sorulur:  subhound-<16 hex>.sirket.com
-2. Hepsi cevap veriyorsa     → wildcard var, dönen IP kümesi kaydedilir
-3. Biri bile boşsa           → wildcard yok
-4. IP kümesi birebir aynı olan bulgular işaretlenir
-```
-
-İki karar bilinçli:
-
-- **Neden birebir eşleşme?** Gerçek bir alt alan adı wildcard ile aynı
-  sunucuda durabilir, örneğin aynı ters vekilin arkasında. Kısmi eşleşmeyle
-  elemek gerçek bulguları kaybettirirdi.
-- **Neden silmek yerine işaretlemek?** Elenen kayıt atılmıyor,
-  `is_wildcard` ile damgalanıyor. `--show-wildcard` ile görülebiliyor.
-  "Şunu buldum ama eledim, istersen bak" demek sessizce atmaktan iyi.
+Kısmi eşleşme yerine birebir eşleşme kullanılmasının nedeni, gerçek bir alt
+alan adının wildcard ile aynı sunucuda barınabilmesi. Elenen sonuçlar
+silinmiyor, `is_wildcard` olarak işaretleniyor ve `--show-wildcard` ile
+görüntülenebiliyor.
 
 ## Fark raporu
 
-Aynı alan adı yeniden tarandığında bir önceki taramada olmayan alt alan adları
-`*` ile işaretleniyor. Bunu düzenli çalıştıran bir ekip, birinin unutup açık
-bıraktığı yeni bir sunucuyu ilk gün görür.
+Aynı alan adı tekrar tarandığında önceki taramada olmayan alt alan adları `*`
+ile işaretleniyor. Düzenli çalıştırıldığında yeni açılan bir sunucunun
+fark edilmesini kolaylaştırıyor.
 
-## Bilerek yapmadıklarım
+## Kapsam ve sınırlar
 
-Gerçek bir keşifte Certificate Transparency kayıtları ve pasif DNS,
-kelime listesinden daha verimli. Bunları eklemedim. Zone transfer (`AXFR`)
-denemesi bazı araçlarda var ama izin sınırına yakın durduğu için **bilerek**
-eklemedim. Alt alan devralma (subdomain takeover) kontrolü de yok.
+Keşif yalnızca size ait ya da test izni verilmiş alan adlarında yapılmalıdır.
+Araç bu nedenle varsayılan olarak hız sınırlı çalışıyor.
 
-## Öğrendiklerim
+Gerçek bir keşifte Certificate Transparency kayıtları ve pasif DNS
+kaynakları kelime listesinden daha verimlidir; bu kaynaklar eklenmedi. Zone
+transfer (`AXFR`) denemesi izin sınırına yakın olduğu için bilinçli olarak
+dışarıda bırakıldı. Alt alan devralma (subdomain takeover) kontrolü ve
+Türkçe karakterli alan adları için punycode dönüşümü de bulunmuyor.
 
-En değerli ders: bir aracın en tehlikeli hata biçimi sessiz eksikliktir.
-Çöken program fark edilir. Eksik liste veren program güven verir ve yanıltır.
-Hız sınırı bir "nezaket" özelliği gibi görünüyordu, aslında doğruluk özelliği
-çıktı.
+Proje 42 testle birlikte geliyor; komut satırı ve REST API aynı motoru
+kullanıyor.

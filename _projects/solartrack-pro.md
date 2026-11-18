@@ -1,7 +1,7 @@
 ---
-title: "A panel that follows the sun: a dual-axis solar tracker with Arduino"
+title: "A solar tracker from my Computer Organization course"
 kisa: An Arduino prototype that finds the sun with four light sensors and turns the panel with two servos.
-ozet: "I built a solar panel prototype that follows the sun with four light sensors and two servo motors. The code is short, but it taught me real-world problems like sensor noise, thresholds and operating modes."
+ozet: "I built a dual-axis solar tracker for my Computer Organization course. In this prototype, running on four light sensors and two servo motors, servo jitter was the issue that took the most time."
 date: 2026-08-07
 teknolojiler: [Arduino, C++, LDR sensors, SG90 servo, Serial communication]
 repo: https://github.com/hasancrlk/SolarTrack-Pro
@@ -10,26 +10,25 @@ sira: 10
 ref: solartrack
 ---
 
-## The idea
-
-A fixed solar panel faces the sun squarely only at one time of day. Turning
-the panel with the sun is the most direct way to get more energy out of the
-same panel. SolarTrack Pro is a small prototype that does this on two axes
-(left-right and up-down).
+A fixed solar panel faces the sun squarely only during part of the day.
+Turning the panel with the sun is a direct way to get more energy from the
+same panel. SolarTrack Pro is a prototype that applies this on two axes
+(left-right and up-down), developed for my Computer Organization course.
 
 ## Hardware
 
 - Arduino Uno R3
-- 4 LDR light sensors: left, right, up, down
-- 10K resistors (voltage dividers for the LDRs)
+- 4 LDR light sensors (left, right, up, down)
+- Voltage dividers with 10K resistors for the LDRs
 - 2 SG90 micro servos and a dual-axis pan-tilt mechanism
 - 4.2V 100mA solar panel, breadboard and jumper wires
 
 ## How it works
 
-Four sensors surround the panel on four sides. When the sun is straight ahead,
-opposite sensors see the same light. As the sun moves, one side stays brighter
-and the panel turns towards it:
+The four sensors sit on the four sides of the panel. When the sun is straight
+ahead, opposite sensors read the same light level. As the sun moves, one side
+receives more light and the panel turns towards it. On the horizontal axis
+the difference between the left and right sensors is used:
 
 ```cpp
 int yatayFark = sol - sag;   // horizontal difference: left - right
@@ -40,51 +39,44 @@ if (yatayFark > ESIK && yatayAci < YATAY_MAX) {
 }
 ```
 
-The vertical axis uses the same logic with the up and down sensors.
+The vertical axis applies the same logic with the up and down sensors.
 
-## Two small but important settings
+## Servo jitter
 
-**Threshold (`ESIK = 30`).** Without a threshold, the servo jitters back and
-forth at the slightest noise in the sensor readings. Not moving until the
-difference exceeds a certain value protects both the motor and the energy
-budget.
+The issue that took the most time in the prototype was servo jitter. LDR
+readings constantly show small fluctuations. When the code reacts to every
+difference between sensors, the servo moves back and forth even when the
+panel is already in the right position.
 
-**Step (`ADIM = 1` degree).** The panel turns one degree at a time instead of
-in large jumps. The motion is smooth and it doesn't oscillate around the
-target. Servo limits (0–180 degrees) keep the mechanism from straining.
+The code has two constants against this:
 
-## Operating modes and serial commands
+- **Threshold (`ESIK = 30`):** the servo doesn't move until the difference
+  between opposite sensors exceeds this value, so measurement noise doesn't
+  turn into movement.
+- **Step (`ADIM = 1` degree):** the panel turns only one degree per loop.
+  Larger steps can cause oscillation around the target.
 
-Tracking all the time doesn't make sense. On cloudy days light is diffuse, and
-at night there is none. In those cases it is better to lock the panel in the
-centre than let it wander:
+Servo angles are also limited to 0–180 degrees so the mechanism isn't
+strained.
 
-| Command | Effect |
-|---|---|
-| `MODE_SUN` | Sun mode: active tracking |
-| `MODE_CLOUD` | Cloud mode: servos locked at 90°/90° |
-| `MODE_NIGHT` | Night mode: servos locked at 90°/90° |
-| `CENTER` | Centre the servos |
-| `STOP` / `START` | Pause / resume movement |
-| `DELAY_<ms>` | Change the sensor read interval (10–500 ms) |
+## Operating modes
 
-On every loop the board prints sensor values and servo angles over serial, so
-a dashboard can read and plot them. The output looks like this (example
-values):
+On cloudy days light is diffuse and the sensors don't point in a clear
+direction; at night there is nothing to track. In those cases the panel is
+locked in the centre instead of wandering. Modes are changed with commands
+over the serial port:
 
-```
-Sol:612 Sag:540 Yukari:701 Asagi:655 | YatayAci:94 DikeyAci:91
-```
+- `MODE_SUN`: active tracking.
+- `MODE_CLOUD` and `MODE_NIGHT`: servos locked at 90°/90°.
+- `CENTER`: centres the servos.
+- `STOP` / `START`: pauses or resumes movement.
+- `DELAY_<ms>`: sets the sensor read interval between 10 and 500 ms.
 
-## Next time
+On every loop the board writes sensor values and servo angles to the serial
+port, so the output can be read and plotted by a dashboard.
 
-Mode changes are manual for now. Picking night and cloud mode automatically
-from the total light level is the natural next step. Measuring the panel's
-voltage and comparing it with a fixed panel would show, in numbers, how much
-efficiency the system actually gains.
+## Possible improvements
 
-## What I learned
-
-In software a condition is either true or false. In the sensor world every
-reading is a little noisy. Two small constants, threshold and step, made the
-difference between a jittery prototype and a system that works smoothly.
+- Choosing cloud and night mode automatically from the total light level.
+- Measuring the panel's voltage and comparing it with a fixed panel. That
+  comparison would show the efficiency gain in numbers.

@@ -1,7 +1,7 @@
 ---
-title: "Güneşi takip eden panel: Arduino ile çift eksenli güneş takip sistemi"
+title: "Bilgisayar Organizasyonu dersinden bir güneş takip sistemi"
 kisa: Dört ışık sensörüyle güneşin yönünü bulup paneli iki servo motorla en verimli açıya çeviren Arduino prototipi.
-ozet: "Dört ışık sensörü ve iki servo motorla güneşi takip eden bir güneş paneli prototipi yaptım. Kod kısa ama sensör gürültüsü, eşik ve çalışma modları gibi gerçek dünya sorunları öğretti."
+ozet: "Bilgisayar Organizasyonu dersi için çift eksenli bir güneş takip sistemi geliştirdim. Dört ışık sensörü ve iki servo motorla çalışan prototipte en çok zaman alan konu servo titremesiydi."
 date: 2026-08-07
 teknolojiler: [Arduino, C++, LDR sensörler, SG90 servo, Seri haberleşme]
 repo: https://github.com/hasancrlk/SolarTrack-Pro
@@ -10,26 +10,26 @@ sira: 10
 ref: solartrack
 ---
 
-## Fikir
-
-Sabit bir güneş paneli güneşe yalnızca günün belli bir saatinde tam dik bakar.
-Paneli güneşle birlikte döndürmek aynı panelden daha fazla enerji almanın en
-doğrudan yolu. SolarTrack Pro bunu iki eksende (sağ-sol ve yukarı-aşağı)
-yapan küçük bir prototip.
+Sabit bir güneş paneli güneşe yalnızca günün belirli bir bölümünde dik
+bakar. Paneli güneşle birlikte döndürmek, aynı panelden daha fazla enerji
+elde etmenin doğrudan bir yolu. SolarTrack Pro bu fikri iki eksende (sağ-sol
+ve yukarı-aşağı) uygulayan bir prototip ve Bilgisayar Organizasyonu dersi
+kapsamında geliştirildi.
 
 ## Donanım
 
 - Arduino Uno R3
-- 4 adet LDR ışık sensörü: sol, sağ, yukarı, aşağı
-- 10K dirençler (LDR'ler için gerilim bölücü)
+- 4 adet LDR ışık sensörü (sol, sağ, yukarı, aşağı)
+- LDR'ler için 10K dirençlerle gerilim bölücü
 - 2 adet SG90 mikro servo ve çift eksenli pan-tilt mekanizması
-- 4.2V 100mA güneş paneli, breadboard ve kablolar
+- 4.2V 100mA güneş paneli, breadboard ve bağlantı kabloları
 
 ## Çalışma prensibi
 
-Dört sensör paneli dört yönden çevreliyor. Güneş tam karşıdaysa karşılıklı
-sensörler aynı ışığı görüyor. Güneş kaydıkça bir taraf daha aydınlık kalıyor
-ve panel o tarafa dönüyor:
+Dört sensör panelin dört kenarına yerleştirildi. Güneş tam karşıdayken
+karşılıklı sensörler aynı ışık değerini okur. Güneş yer değiştirdikçe bir
+taraf daha fazla ışık alır ve panel o yöne döndürülür. Yatay eksende sol ve
+sağ sensörlerin farkına bakılıyor:
 
 ```cpp
 int yatayFark = sol - sag;
@@ -40,50 +40,45 @@ if (yatayFark > ESIK && yatayAci < YATAY_MAX) {
 }
 ```
 
-Dikey eksen de aynı mantıkla yukarı ve aşağı sensörlerin farkına bakıyor.
+Dikey eksende aynı mantık yukarı ve aşağı sensörlerle uygulanıyor.
 
-## İki küçük ama önemli ayar
+## Servo titremesi
 
-**Eşik (`ESIK = 30`).** Eşik olmadan servo, sensör okumalarındaki en küçük
-gürültüde bile ileri geri titriyor. Fark belirli bir değeri aşmadan hareket
-etmemek hem motoru hem enerjiyi koruyor.
+Prototipte en çok zaman alan sorun servo motorların titremesiydi. LDR
+okumaları sürekli küçük dalgalanmalar gösteriyor. Sensörler arasındaki her
+farka tepki verildiğinde servo, panel doğru konumdayken bile ileri geri
+hareket ediyor.
 
-**Adım (`ADIM = 1` derece).** Panel bir seferde büyük açılarla değil, birer
-derece dönüyor. Hareket yumuşak oluyor ve hedefin etrafında salınım olmuyor.
-Servo sınırları (0–180 derece) da mekanizmanın zorlanmasını önlüyor.
+Kodda bu soruna karşı iki sabit bulunuyor:
 
-## Çalışma modları ve seri komutlar
+- **Eşik (`ESIK = 30`):** Karşılıklı sensörler arasındaki fark bu değeri
+  aşmadıkça servo hareket etmiyor. Böylece ölçüm gürültüsü hareket olarak
+  yansımıyor.
+- **Adım (`ADIM = 1` derece):** Panel her döngüde yalnızca bir derece dönüyor.
+  Büyük adımlar hedefin etrafında salınıma yol açabilir.
 
-Her zaman takip etmek mantıklı değil. Bulutlu havada ışık dağınık geliyor,
-gece ise hiç yok. Bu durumlarda panelin rastgele dönmesi yerine ortaya
-kilitlenmesi daha iyi:
+Servo açıları ayrıca 0–180 derece arasında sınırlandırıldı; böylece mekanizma
+zorlanmıyor.
 
-| Komut | Etki |
-|---|---|
-| `MODE_SUN` | Güneş modu: aktif takip |
-| `MODE_CLOUD` | Bulut modu: servolar 90°/90°'de kilitli |
-| `MODE_NIGHT` | Gece modu: servolar 90°/90°'de kilitli |
-| `CENTER` | Servoları ortala |
-| `STOP` / `START` | Hareketi durdur / yeniden başlat |
-| `DELAY_<ms>` | Sensör okuma sıklığını değiştir (10–500 ms) |
+## Çalışma modları
 
-Kart her döngüde sensör değerlerini ve servo açılarını seri porttan yazıyor.
-Bu satırlar bir arayüzde (dashboard) okunup grafiğe dökülebiliyor. Çıktının
-biçimi şöyle (değerler örnek):
+Bulutlu havada ışık dağınık geldiği için sensörler net bir yön göstermiyor;
+gece ise takip edilecek bir kaynak yok. Bu durumlarda panelin rastgele
+dönmesi yerine ortada sabitlenmesi tercih edildi. Modlar seri port
+üzerinden komutla değiştiriliyor:
 
-```
-Sol:612 Sag:540 Yukari:701 Asagi:655 | YatayAci:94 DikeyAci:91
-```
+- `MODE_SUN`: Aktif takip.
+- `MODE_CLOUD` ve `MODE_NIGHT`: Servolar 90°/90° konumunda kilitli.
+- `CENTER`: Servoları ortalar.
+- `STOP` / `START`: Hareketi durdurur ya da yeniden başlatır.
+- `DELAY_<ms>`: Sensör okuma aralığını 10–500 ms arasında değiştirir.
 
-## Bir dahaki sefere
+Kart her döngüde sensör değerlerini ve servo açılarını seri porta yazıyor.
+Bu çıktı bir arayüz üzerinden okunup grafiğe dökülebiliyor.
 
-Şu an mod değişikliği elle yapılıyor. Toplam ışık seviyesinden gece ve bulut
-modunu otomatik seçmek doğal bir sonraki adım. Panelin ürettiği gerilimi de
-ölçüp sabit panelle karşılaştırmak, sistemin gerçekten ne kadar verim
-kazandırdığını sayıyla gösterirdi.
+## Geliştirilebilecek yönler
 
-## Öğrendiklerim
-
-Yazılımda bir koşul ya doğrudur ya yanlış. Sensör dünyasında ise her okuma
-biraz gürültülü. Eşik ve adım gibi iki küçük sabit, titreyen bir prototiple
-düzgün çalışan bir sistem arasındaki farkı oluşturdu.
+- Toplam ışık seviyesine bakarak bulut ve gece modunun otomatik seçilmesi.
+- Panelin ürettiği gerilimin ölçülüp sabit bir panelle karşılaştırılması.
+  Bu karşılaştırma sistemin sağladığı verim artışını sayısal olarak
+  gösterecektir.

@@ -1,7 +1,7 @@
 ---
-title: "When the attacker tries to erase their tracks: signed file integrity monitoring"
+title: "A tool I hadn't heard of before my internship: file integrity monitoring"
 kisa: A forensics tool that takes a signed fingerprint of a folder and finds files that were later changed, added or deleted.
-ozet: "I built a tool that fingerprints a folder and later finds which files changed. The real question was: what happens if the attacker changes the fingerprint itself?"
+ozet: "I first came across file integrity monitoring (FIM) during my internship. This post covers the tool that finds changed files, and how it protects its own records against tampering."
 date: 2026-09-17
 teknolojiler: [Python, FastAPI, SQLAlchemy, Alembic, Typer, PostgreSQL, Docker]
 repo: https://github.com/hasancrlk/dosya-butunlugu-izleme
@@ -10,38 +10,46 @@ sira: 2
 ref: fim-sentinel
 ---
 
-## The problem
+When I started my internship at EMT Cyber, I had not heard the term "File
+Integrity Monitoring". When it was given to me as an assignment, the first
+step was understanding what it is and why it is so widely used.
 
-An attacker who breaks into a web server usually leaves traces. They inject a
-script into the home page, drop a backdoor called `shell.php` or edit a config
-file. These changes can go unnoticed for weeks.
+## The concept
 
-**File Integrity Monitoring** (FIM) is an old and effective defence. First you
-take a fingerprint of the folder in its clean state, called a baseline. Then
-you rescan it regularly and compare:
+An attacker who breaks into a server often leaves traces in the file system:
+injected code in a page, an uploaded backdoor, a modified config file. File
+integrity monitoring catches these changes in two steps:
+
+1. Take a fingerprint of the folder in a trusted state, called a
+   **baseline**.
+2. Rescan the folder periodically and compare it with the baseline.
+
+On the command line:
 
 ```
+$ python -m cli.fim_cli baseline --path /var/www/html
 $ python -m cli.fim_cli scan --baseline-id 1
-┏━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Type     ┃ File Path                ┃ Detail                  ┃
-┡━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━┩
+
 │ MODIFIED │ /var/www/html/index.html │ Hash mismatch detected. │
 │ MODIFIED │ /var/www/html/config.php │ Hash mismatch detected. │
 │ ADDED    │ /var/www/html/shell.php  │ New file detected.      │
-└──────────┴──────────────────────────┴─────────────────────────┘
 ```
 
-That part is easy. The hard question is: **what if the attacker edits the
-baseline too?** Someone with database access adds `shell.php` to the baseline
-and the tool reports that everything is fine.
+For every file the SHA-256 hash, size, permissions and ownership are stored.
+Files are read in 64 KB chunks, so large files don't strain memory.
 
-## Hard part: Chain of custody
+## The real question: the records themselves
 
-In digital forensics this is called **chain of custody**: being able to prove
-that evidence was not tampered with. I built five layers for it.
+However accurate the comparison is, the baseline lives in a database. An
+attacker with database access can add the `shell.php` they uploaded to the
+baseline as well, and the scan will then show no change.
 
-**1. Baselines are signed.** Every baseline is signed with a secret key
-(HMAC-SHA256). The signature is computed over a canonical form that does not
+In digital forensics this is addressed by **chain of custody**: being able to
+prove that evidence has not changed since it was collected. The tool has the
+following safeguards:
+
+**Baselines are signed.** Each baseline is signed with HMAC-SHA256 using
+`FIM_HMAC_KEY`. The signature is computed over sorted rows, so it does not
 depend on file order:
 
 ```python
@@ -57,55 +65,35 @@ def sign_baseline(target_path, follow_symlinks, entries) -> str:
     return mac.hexdigest()
 ```
 
-A baseline edited in the database is rejected at scan time (HTTP 409), and the
-attempt itself is recorded.
+A scan against a baseline whose signature doesn't match is rejected with
+HTTP 409, and the attempt is written to the audit log.
 
-**2. The audit log is chained.** Every operation is written to an audit log
-and each row is bound to the hash of the previous one. Deleting a row, editing
-one or reordering them breaks the chain. The `verify-audit` command checks the
-chain end to end and points at the broken row. On PostgreSQL a trigger also
-blocks UPDATE and DELETE.
+**The audit log is chained.** Every operation is written to an audit log and
+each row is bound to the hash of the previous row. Deleting, editing or
+reordering a row breaks the chain; the `verify-audit` command shows where.
+On PostgreSQL a trigger also blocks UPDATE and DELETE on that table.
 
-**3. Permissions are tracked, not just content.** Next to the SHA-256 hash,
-size, file mode and owner are stored. A file whose content stays the same but
-becomes world-writable is a finding too.
+**Symlinks are not followed.** The link target is recorded instead, so
+re-pointing a link shows up as a change and files outside the monitored
+folder are never read.
 
-**4. Symlinks are not followed.** The link target is recorded instead. Re-pointing
-a link is detected and nothing outside the monitored folder is ever read:
+**Unreadable is not deleted.** A file that cannot be read because of
+permissions is reported as an error, not as `DELETED`. In a forensic
+investigation this distinction prevents a wrong conclusion.
 
-```python
-if stat.S_ISLNK(st.st_mode) and not follow_symlinks:
-    target = os.readlink(file_path)
-    result.sha256 = hashlib.sha256(f"symlink:{target}".encode()).hexdigest()
-```
+`FIM_HMAC_KEY` must be stored separately from the monitored server's
+database. An attacker with access to both the database and the key could
+re-sign the baseline; this is a documented limit of the tool.
 
-**5. Unreadable is not "deleted".** A file that exists but cannot be read
-because of permissions is reported as an error. Reporting it as `DELETED`
-would send the investigator after the wrong story.
+## Everyday use
 
-> Where the key lives matters. Anyone holding both the database and
-> `FIM_HMAC_KEY` can forge a baseline. The key belongs outside the monitored
-> host, in a secrets manager.
-
-## Large files
-
-Files are read and hashed in 64 KB chunks, so a multi-gigabyte file does not
-blow up memory. Permission errors and symlink loops are logged; the tool does
-not crash.
-
-## Wiring it into automation
-
-The `scan` command exits with code **2** when it finds changes. That small
-detail makes it easy to hook into cron or CI:
+The `scan` command exits with code 2 when it finds changes, so the tool can
+be wired directly into scheduled jobs:
 
 ```bash
 0 * * * * fim-sentinel scan -b 1 || echo "Integrity alert" | mail -s FIM admin@example.com
 ```
 
-## What I learned
-
-When designing a security tool, ask: "what would the attacker do to this tool
-itself?" Writing a tool that detects changes is easy. Writing one that can
-prove its own records were not changed is the real work. That question led me
-to signatures, a chained log and a database trigger. The CLI and the REST API
-share the same service layer, so no rule has to be written twice.
+The same operations are available over a REST API. The API requires an
+`X-API-Key` header and can only scan folders allowed in `FIM_ALLOWED_PATHS`.
+The CLI and the API share one service layer, so no rule is written twice.

@@ -1,7 +1,7 @@
 ---
-title: "Başlık var ama korumuyor: web güvenlik başlıklarına A–F notu veren tarayıcı"
+title: "Güvenlik başlıklarını değerleriyle puanlamak"
 kisa: Web sitelerinin güvenlik başlıklarını değerleriyle birlikte puanlayan, eksikler için hazır satır öneren tarayıcı.
-ozet: "Web sitelerinin güvenlik başlıklarını kontrol edip A–F arası not veren bir tarayıcı yazdım. Başlığın var olup olmadığına değil, gerçekten koruyup korumadığına bakıyor."
+ozet: "Web sitelerinin HTTP güvenlik başlıklarını inceleyip 0–100 arası puan ve A–F arası not veren bir tarayıcı. Başlığın yalnızca var olup olmadığına değil, değerinin gerçekten koruma sağlayıp sağlamadığına bakıyor."
 date: 2026-09-18
 teknolojiler: [Python, httpx, FastAPI, SQLAlchemy, PostgreSQL, Docker]
 repo: https://github.com/hasancrlk/http-guvenlik-basligi-tarayici
@@ -10,52 +10,52 @@ sira: 6
 ref: headerguard
 ---
 
-## Problem
-
-Bir web sitesi her sayfayla birlikte tarayıcıya görünmeyen güvenlik başlıkları
-gönderir: "bu siteyi yalnızca HTTPS ile aç" (HSTS), "yalnızca şu kaynaklardan
-script yükle" (CSP), "sayfamı başka sitenin içine gömme" (X-Frame-Options).
-Eksik ya da yanlış olduklarında site çalışmaya devam eder. Sorun ancak bir
-saldırı olunca görünür.
-
-Var olan birçok kontrol aracı yalnızca "başlık var mı?" diye bakıyor. Bu da şu
-yapılandırmaya iyi not veriyor:
+Aşağıdaki satır geçerli bir HTTP yanıt başlığıdır:
 
 ```
 Strict-Transport-Security: max-age=1
 ```
 
-Başlık **var**. Ve tam olarak bir saniye boyunca koruyor, yani korumuyor.
+Başlık mevcut olduğu için yalnızca varlığına bakan bir kontrol bu siteyi
+başarılı sayar. Oysa `max-age=1`, tarayıcıya bu kuralı yalnızca bir saniye
+hatırlamasını söyler. HeaderGuard bu tür durumları ayırt etmek için yazıldı.
 
-## Zor kısım 1: Var/yok yerine oran
+## Puanlama
 
-Her başlığın alt kontrolleri var ve başarısız her kontrol başlığın puan oranını
-düşürüyor:
+Her başlık için bir ağırlık ve bir dizi alt kontrol tanımlı. Başarısız olan
+her kontrol başlığın puan oranını düşürüyor. Toplam puan, oranların ağırlıklı
+ortalamasından ve ceza puanlarından oluşuyor.
 
-| Başlık | Değer | Oran | Neden |
-|---|---|---|---|
-| HSTS | `max-age=31536000; includeSubDomains` | 1.00 | Tam |
-| HSTS | `max-age=31536000` | 0.80 | Alt alan adları korumasız |
-| HSTS | `max-age=60` | 0.50 | 6 aydan kısa |
-| CSP | `default-src 'self'; script-src 'unsafe-inline'` | 0.60 | XSS korumasında delik |
+En yüksek ağırlıklar, korumadaki rollerine göre belirlendi:
 
-Toplam puan ağırlıklı ortalamadan geliyor. En ağır başlıklar CSP (22) ve HSTS
-(18). Sürüm sızdıran `Server: nginx/1.24.0`, `X-Powered-By` ve
-`Access-Control-Allow-Origin: *` gibi başlıklar ceza puanı alıyor.
+- **Content-Security-Policy (22):** XSS etkisini sınırlayan en güçlü başlık.
+- **Strict-Transport-Security (18):** HTTPS'ten HTTP'ye düşürme saldırılarını
+  engeller.
+- **X-Frame-Options (10):** Sayfanın başka bir sitede çerçeve içine
+  alınmasını, yani clickjacking'i engeller.
+- **X-Content-Type-Options ve Referrer-Policy (8'er):** MIME tahmini ve
+  adres sızıntısı.
 
-İki özel durumu ayrıca düşündüm:
+Bazı örnekler:
 
-- **Düz HTTP sitede HSTS eksikliği ayrıca cezalandırılmıyor.** Asıl sorun
-  HTTP'nin kendisi ve o ayrı, yüksek önemli bir bulgu. Aynı eksikliği iki kez
-  saymak notu yapay biçimde düşürürdü.
-- **`X-Frame-Options` yok ama CSP'de `frame-ancestors` varsa tam puan.**
-  Modern ve doğru yapılandırmayı eski başlığı taşımadığı için cezalandırmak
-  yanlış olurdu.
+- `max-age=31536000; includeSubDomains` → HSTS tam puan alır.
+- `max-age=31536000` → alt alan adları korumasız kaldığı için oran 0,80.
+- `max-age=60` → süre altı aydan kısa olduğu için oran 0,50.
+- `script-src 'unsafe-inline'` içeren bir CSP → oran 0,60.
 
-## Zor kısım 2: Kurallar kodda değil, dosyada
+Sürüm bilgisi veren `Server: nginx/1.24.0`, `X-Powered-By` ve
+`Access-Control-Allow-Origin: *` gibi başlıklar ise ceza puanı alıyor.
 
-Kurallar `data/rules.json` dosyasında duruyor. Kurum kendi politikasını
-yazabiliyor, kod değişmiyor:
+İki durum özel olarak ele alındı. Düz HTTP üzerinden sunulan bir sitede HSTS
+eksikliği ayrıca cezalandırılmıyor; asıl sorun HTTP kullanımının kendisi ve o
+ayrı bir yüksek önemli bulgu olarak raporlanıyor. CSP'de `frame-ancestors`
+tanımlıysa `X-Frame-Options` eksikliği puan kaybettirmiyor, çünkü modern
+yapılandırma bu.
+
+## Kurallar kodda değil, dosyada
+
+Puanlama kuralları `data/rules.json` dosyasında tutuluyor. Bir kurum kendi
+politikasını kod değiştirmeden tanımlayabiliyor:
 
 ```json
 {
@@ -69,49 +69,38 @@ yazabiliyor, kod değişmiyor:
 }
 ```
 
-Burada bir güvenlik sorusu var: esnek bir kural dosyası, onu değiştirebilen
-birine **kod çalıştırma** imkânı vermemeli. Bu yüzden kontrol tipleri sabit
-bir kümeden seçiliyor. Tanınmayan bir tip dosyayı reddettiriyor, sessizce
-atlanmıyor. Düzenli ifadeler açılışta derleniyor ve hiçbir `eval` yolu yok.
+Yapılandırılabilir bir dosyanın, onu değiştirebilen birine kod çalıştırma
+imkânı vermemesi gerekiyor. Bu nedenle kontrol tipleri sabit bir kümeden
+seçiliyor ve tanınmayan bir tip dosyanın yüklenmesini durduruyor. Düzenli
+ifadeler uygulama açılırken derleniyor; herhangi bir `eval` yolu bulunmuyor.
+Yürürlükteki kurallar `GET /rules` ucundan okunabiliyor, böylece verilen
+notun nasıl hesaplandığı her zaman görülebiliyor.
 
-Yürürlükteki kurallar `GET /rules` ile okunabiliyor. Hesaplanma biçimi
-görülemeyen bir not tartışılamaz da. "Neden C aldık?" sorusunun cevabı elde
-olmalı.
+## Yönlendirmeler
 
-## Zor kısım 3: Yönlendirmeler
+Yönlendirmeler `httpx`'in otomatik takibine bırakılmadı, elle izleniyor.
+Otomatik takipte yalnızca son yanıtın başlıkları görülür; oysa zincirin
+kendisi bir bulgu olabilir. `https://` ile başlayıp `http://` ile biten bir
+zincir **protokol düşürme** olarak yüksek önemle raporlanıyor. 10'dan fazla
+yönlendirme döngü olarak kabul ediliyor.
 
-Yönlendirmeleri `httpx`'in otomatik takibine bırakmadım, elle izliyorum.
-Otomatik takipte yalnızca son yanıtın başlıkları görünüyor. Oysa zincirin
-kendisi bir bulgu:
+Erişilemeyen bir hedef taramanın tamamını durdurmuyor; her hedef ayrı
+değerlendiriliyor ve sonuçta hata türüyle görünüyor.
 
-```
-http://site.com → https://site.com → https://www.site.com
-                                      ↑ HSTS burada var, ama ilk istek düz HTTP'ydi
-```
+## Çerezler, TLS ve karşılaştırma
 
-`https://` ile başlayıp `http://` ile biten bir zincir **protokol düşürme**
-olarak yüksek önemle raporlanıyor. Erişilemeyen bir hedef taramayı çökertmiyor.
-Her hedef ayrı değerlendiriliyor ve sonuçta hata türüyle görünüyor.
+Çerezlerde `Secure`, `HttpOnly` ve `SameSite` bayrakları kontrol ediliyor.
+TLS sertifikasının sahibi, yayıncısı ve bitmesine kalan gün sayısı
+raporlanıyor. İki tarama karşılaştırılırken yalnızca her iki taramada da
+bulunan hedefler hesaba katılıyor; listeden çıkarılan bir hedefin ortalamayı
+yükseltip iyileşme gibi görünmesi bu şekilde önleniyor.
 
-## Çerezler, TLS ve fark raporu
+## Sınırlar
 
-Çerezlerde `Secure`, `HttpOnly` ve `SameSite` bayrakları kontrol ediliyor. TLS
-sertifikasının sahibi, yayıncısı ve bitmesine kaç gün kaldığı raporlanıyor.
-İki taramayı karşılaştıran bir rapor da var. Burada bir tuzağı kapattım:
-listeden çıkarılan kötü bir site ortalamayı yükselttiği için "iyileşme" gibi
-görünmesin diye yalnızca iki taramada da bulunan hedefler karşılaştırılıyor.
+Yalnızca sitenin kök sayfası taranıyor ve JavaScript çalıştırılmıyor; bu
+nedenle `<meta>` etiketiyle verilen CSP görülmüyor. CSP analizi `unsafe-inline`
+ve `default-src *` gibi açık zayıflıkları yakalıyor, nonce ve hash
+stratejilerini değerlendirmiyor. Yüksek bir not sitenin güvenli olduğu
+anlamına gelmiyor; başlıklar savunmanın yalnızca bir katmanı.
 
-## Bilerek yapmadıklarım
-
-Yalnızca sitenin kök sayfası taranıyor. JavaScript çalıştırılmıyor, bu yüzden
-`<meta>` ile verilen CSP görülmüyor. CSP analizi yüzeysel: `unsafe-inline`
-yakalanıyor ama nonce/hash stratejisi değerlendirilmiyor. En önemlisi: **A
-alan bir site güvenli demek değil.** Başlıklar savunmanın yalnızca bir katmanı.
-
-## Öğrendiklerim
-
-Puanlama sistemi tasarlamak teknik bir iş olduğu kadar adalet işi. Her kural
-"bu yapılandırmayı yanlışlıkla cezalandırır mı ya da ödüllendirir mi?"
-sorusundan geçmeli. Bir de şunu öğrendim: yapılandırılabilirlik bir saldırı
-yüzeyi açar. Esnekliği kod çalıştırmaya dönüşmeyecek şekilde sınırlamak
-gerekir.
+Proje 53 testle birlikte geliyor.

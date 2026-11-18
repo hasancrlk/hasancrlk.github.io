@@ -1,7 +1,7 @@
 ---
-title: "The header is there but doesn't protect: grading web security headers A to F"
+title: "Scoring security headers by their values"
 kisa: A scanner that scores web security headers by their values, not just their presence, and suggests ready-to-paste fixes.
-ozet: "I built a scanner that checks a website's security headers and gives it an A–F grade. It doesn't ask whether a header exists. It asks whether it actually protects."
+ozet: "A scanner that inspects a website's HTTP security headers and gives it a 0–100 score and an A–F grade. It checks not only whether a header exists but whether its value actually provides protection."
 date: 2026-09-18
 teknolojiler: [Python, httpx, FastAPI, SQLAlchemy, PostgreSQL, Docker]
 repo: https://github.com/hasancrlk/http-guvenlik-basligi-tarayici
@@ -10,53 +10,51 @@ sira: 6
 ref: headerguard
 ---
 
-## The problem
-
-With every page, a website sends invisible security headers to the browser:
-"only open this site over HTTPS" (HSTS), "only load scripts from these
-sources" (CSP), "don't embed my page in another site" (X-Frame-Options). When
-they are missing or wrong the site keeps working. The problem only shows up
-during an attack.
-
-Many existing checkers only ask "is the header present?", which gives a good
-grade to this:
+The following line is a valid HTTP response header:
 
 ```
 Strict-Transport-Security: max-age=1
 ```
 
-The header **exists**. And it protects for exactly one second, which means it
-doesn't.
+Because the header is present, a check that only looks at presence treats the
+site as compliant. But `max-age=1` tells the browser to remember the rule for
+one second. HeaderGuard was written to tell such cases apart.
 
-## Hard part 1: Ratios instead of present/absent
+## Scoring
 
-Each header has sub-checks, and every failed check lowers that header's score
-ratio:
+Each header has a weight and a set of sub-checks. Every failed check lowers
+the header's score ratio. The total is the weighted average of the ratios,
+minus penalty points.
 
-| Header | Value | Ratio | Why |
-|---|---|---|---|
-| HSTS | `max-age=31536000; includeSubDomains` | 1.00 | Complete |
-| HSTS | `max-age=31536000` | 0.80 | Subdomains unprotected |
-| HSTS | `max-age=60` | 0.50 | Shorter than 6 months |
-| CSP | `default-src 'self'; script-src 'unsafe-inline'` | 0.60 | Hole in XSS protection |
+The highest weights follow each header's role in protection:
 
-The total is a weighted average. CSP (22) and HSTS (18) weigh the most.
-Headers like a version-leaking `Server: nginx/1.24.0`, `X-Powered-By` and
-`Access-Control-Allow-Origin: *` cost penalty points.
+- **Content-Security-Policy (22):** the strongest header for limiting XSS.
+- **Strict-Transport-Security (18):** blocks HTTPS-to-HTTP downgrade attacks.
+- **X-Frame-Options (10):** prevents the page from being framed by another
+  site, i.e. clickjacking.
+- **X-Content-Type-Options and Referrer-Policy (8 each):** MIME sniffing and
+  address leakage.
 
-Two special cases got extra thought:
+Some examples:
 
-- **A plain-HTTP site isn't additionally penalised for missing HSTS.** The
-  real problem is HTTP itself, which is a separate high-severity finding.
-  Counting the same gap twice would push the grade down artificially.
-- **No `X-Frame-Options` but CSP has `frame-ancestors` → full marks.**
-  Punishing the modern, correct configuration for not carrying the legacy
-  header would be wrong.
+- `max-age=31536000; includeSubDomains` → HSTS gets full marks.
+- `max-age=31536000` → ratio 0.80, subdomains stay unprotected.
+- `max-age=60` → ratio 0.50, shorter than six months.
+- A CSP containing `script-src 'unsafe-inline'` → ratio 0.60.
 
-## Hard part 2: Rules live in a file, not in code
+Headers such as a version-revealing `Server: nginx/1.24.0`, `X-Powered-By`
+and `Access-Control-Allow-Origin: *` cost penalty points.
 
-Rules live in `data/rules.json`. An organisation can write its own policy
-without touching the code:
+Two cases are handled specially. On a site served over plain HTTP, a missing
+HSTS header is not penalised separately; the real issue is the use of HTTP
+itself, reported as its own high-severity finding. If the CSP defines
+`frame-ancestors`, a missing `X-Frame-Options` costs nothing, because that is
+the modern configuration.
+
+## Rules live in a file, not in code
+
+Scoring rules are kept in `data/rules.json`. An organisation can define its
+own policy without changing the code:
 
 ```json
 {
@@ -70,48 +68,37 @@ without touching the code:
 }
 ```
 
-That raises a security question: a flexible rules file must not give whoever
-can edit it a way to **run code**. So check types come from a fixed set. An
-unknown type makes the file fail to load instead of being skipped silently.
-Regular expressions are compiled at startup and there is no `eval` path.
+A configurable file must not give whoever can edit it a way to run code.
+Check types therefore come from a fixed set, and an unknown type stops the
+file from loading. Regular expressions are compiled at startup, and there is
+no `eval` path. The active rules can be read from `GET /rules`, so the way a
+grade was calculated is always visible.
 
-The active rules are readable at `GET /rules`. A grade you can't see the
-formula for can't be argued with either. "Why did we get a C?" deserves an
-answer.
+## Redirects
 
-## Hard part 3: Redirects
+Redirects are followed by hand rather than left to `httpx`. With automatic
+following, only the last response's headers are visible, while the chain
+itself can be a finding. A chain that starts at `https://` and ends at
+`http://` is reported as a high-severity **protocol downgrade**. More than 10
+redirects are treated as a loop.
 
-I don't let `httpx` follow redirects automatically; I follow them by hand.
-Automatic following only shows the last response's headers, but the chain
-itself is a finding:
+An unreachable target does not stop the whole scan; each target is evaluated
+separately and appears in the result with its error type.
 
-```
-http://site.com → https://site.com → https://www.site.com
-                                      ↑ HSTS is here, but the first request was plain HTTP
-```
-
-A chain that starts at `https://` and ends at `http://` is reported as a
-high-severity **protocol downgrade**. An unreachable target doesn't crash the
-scan. Each target is evaluated on its own and shows up with its error type.
-
-## Cookies, TLS and the diff report
+## Cookies, TLS and comparison
 
 Cookies are checked for `Secure`, `HttpOnly` and `SameSite`. The TLS
-certificate's subject, issuer and days until expiry are reported. There is
-also a report comparing two scans. I closed a trap there: only targets present
-in both scans are compared, so removing a bad site from the list doesn't look
-like an "improvement" just because the average went up.
+certificate's subject, issuer and days until expiry are reported. When two
+scans are compared, only targets present in both are considered, so removing
+a target from the list cannot raise the average and look like an
+improvement.
 
-## What I deliberately left out
+## Limits
 
-Only the site's root page is scanned. JavaScript isn't executed, so CSP set
-via `<meta>` isn't seen. CSP analysis is shallow: `unsafe-inline` is caught,
-but nonce/hash strategies aren't evaluated. Most importantly: **an A doesn't
-mean the site is secure.** Headers are just one layer of defence.
+Only the site's root page is scanned and JavaScript is not executed, so a CSP
+set via a `<meta>` tag is not seen. CSP analysis catches obvious weaknesses
+such as `unsafe-inline` and `default-src *` but does not evaluate nonce and
+hash strategies. A high grade does not mean the site is secure; headers are
+only one layer of defence.
 
-## What I learned
-
-Designing a scoring system is as much about fairness as it is technical. Every
-rule should pass the question "could this wrongly punish or reward a
-configuration?". I also learned that configurability opens an attack surface.
-Flexibility has to be bounded so it can never turn into code execution.
+The project ships with 53 tests.

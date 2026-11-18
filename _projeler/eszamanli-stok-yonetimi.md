@@ -1,7 +1,7 @@
 ---
-title: "50 konsol, 300 alıcı: flaş indirimde stok neden eksiye düşer, nasıl düşmez?"
+title: "Elli ürün, üç yüz istek ve tek bir SQL cümlesi"
 kisa: Yüzlerce eşzamanlı satın alma isteği altında stoğun asla eksiye düşmediğini testle kanıtlayan arka uç servisi.
-ozet: "Stokta 50 ürün varken aynı anda 300 kişi satın almaya çalışırsa ne olur? Bu sorunun cevabını tek bir SQL cümlesiyle verdim ve bir testle kanıtladım."
+ozet: "Stokta 50 ürün varken aynı anda 300 satın alma isteği gelirse ne olur? Bu servis, sorunun cevabını tek bir atomik SQL cümlesiyle veriyor ve bir eşzamanlılık testiyle kanıtlıyor."
 date: 2026-08-31
 teknolojiler: [Python, FastAPI, SQLAlchemy async, asyncpg, PostgreSQL, pytest]
 repo: https://github.com/hasancrlk/Es_Zamanlilik_Stok_Yonetimi
@@ -10,39 +10,32 @@ sira: 7
 ref: stok
 ---
 
-## Problem
+Senaryo bir flaş indirim: stokta 50 oyun konsolu var ve kampanya başladığı
+anda çok sayıda kullanıcı aynı anda satın alma isteği gönderiyor. Sistemden
+beklenen iki şey var: stoktan fazla satış yapılmaması ve yük altında
+sistemin kilitlenmemesi.
 
-Bir e-ticaret sitesi flaş indirim yapıyor. Stokta 50 oyun konsolu var ve
-kampanya başladığı saniyede yüzlerce kişi "Satın Al"a basıyor. İki şey
-olmamalı:
+Bu proje EMT Cyber stajında verilen ödevlerin ilkiydi.
 
-1. **Stoktan fazla satış.** Elinizde olmayan bir ürünü satmak.
-2. **Sistemin kilitlenmesi.** Yük altında sitenin cevap verememesi.
+## Sorunun kaynağı
 
-Bu küçük servis ürünleri listeliyor ve satın alma isteklerini karşılıyor. Asıl
-amacı birinci maddenin nasıl doğru çözüleceğini göstermek.
-
-## Yanlış yol: Önce oku, sonra yaz
-
-İlk akla gelen kod şu:
+İlk akla gelen yöntem stoğu okuyup kontrol etmek, sonra azaltmak:
 
 ```python
-urun = await db.get(Item, item_id)     # 1. stoğu oku
-if urun.stock >= adet:                  # 2. yeterli mi?
-    urun.stock -= adet                  # 3. düşür ve kaydet
+urun = await db.get(Item, item_id)
+if urun.stock >= adet:
+    urun.stock -= adet
 ```
 
-Tek kullanıcıda kusursuz çalışıyor. İki istek 1. adımı aynı anda çalıştırınca
-ikisi de "stokta 1 kaldı" görüyor ve ikisi de satışı tamamlıyor. Buna **kayıp
-güncelleme** (lost update) deniyor. Sonuç: stok `-1`.
+Tek bir istek için bu kod doğru çalışır. İki istek ilk satırı aynı anda
+çalıştırırsa ikisi de aynı stok değerini okur ve ikisi de satışı tamamlar.
+Bu duruma **kayıp güncelleme** (lost update) denir ve sonuç eksi stoktur. Hata
+yalnızca eşzamanlı isteklerde ortaya çıktığı için tek tek yapılan denemelerde
+görünmez.
 
-Bu tür hatanın sinsi yanı, geliştirme sırasında neredeyse hiç görünmemesi.
-Yerelde tek tek tıklayarak denerken asla çıkmıyor. Ancak gerçek yük altında
-ortaya çıkıyor.
+## Çözüm
 
-## Doğru yol: Tek atomik cümle
-
-Kontrol ile düşürmeyi ayırmak yerine tek bir SQL cümlesinde birleştirdim:
+Kontrol ve azaltma tek bir SQL cümlesinde birleştirildi:
 
 ```python
 result = await db.execute(
@@ -54,30 +47,22 @@ result = await db.execute(
 new_stock = result.scalar_one_or_none()
 ```
 
-Bu neden güvenli?
+PostgreSQL bu cümleyi çalıştırırken ilgili satıra satır kilidi koyar. Aynı
+satıra gelen diğer istekler ilk işlem tamamlanana kadar bekler ve sıra
+kendilerine geldiğinde `stock >= adet` koşulunu güncel değer üzerinden yeniden
+değerlendirir. Stok yetersizse hiçbir satır güncellenmez. Bu durumda servis
+ürünün var olup olmadığına bakıp `404` ya da `409` döner.
 
-1. PostgreSQL satırı güncellerken o satıra otomatik olarak **satır kilidi**
-   koyuyor.
-2. Aynı satıra gelen diğer istekler ilk işlem bitene kadar **sırada
-   bekliyor**.
-3. Sıra kendisine gelen istek `stock >= adet` koşulunu **güncel değerle
-   yeniden** değerlendiriyor. Stok yetmiyorsa hiçbir satır güncellenmiyor.
-4. Güncellenen satır yoksa servis ürünün var olup olmadığına bakıyor ve buna
-   göre `404` ya da `409` dönüyor.
+Bu yaklaşımla ek bir `SELECT ... FOR UPDATE` sorgusuna, uygulama tarafında
+kilide ya da yeniden deneme döngüsüne ihtiyaç kalmıyor.
 
-Ek bir `SELECT ... FOR UPDATE` sorgusuna, uygulama tarafında kilide ya da
-yeniden deneme döngüsüne gerek kalmıyor.
+Ayrıca tabloda `CHECK (stock >= 0)` kısıtı tanımlı. Kod ileride yanlışlıkla
+değiştirilse bile veritabanı eksi stoğu kabul etmiyor.
 
-### Son güvenlik ağı
+## Doğrulama
 
-Tabloda bir veritabanı kısıtı var: `CHECK (stock >= 0)`. Kod bir gün
-yanlışlıkla değiştirilse bile veritabanı eksi stoku reddediyor. Kuralın
-veritabanında da durması, kod yolu unutulduğunda bile korumanın sürmesini
-sağlıyor.
-
-## Kanıt
-
-Bir kuralı "çalışıyor" demek yetmez, testle göstermek lazım:
+Bu davranış ancak eşzamanlı istek gönderen bir testle doğrulanabilir; tek tek
+gönderilen isteklerle yazılmış bir test her koşulda geçer:
 
 ```python
 async def test_concurrent_purchases_never_go_negative(client):
@@ -92,31 +77,24 @@ async def test_concurrent_purchases_never_go_negative(client):
 
     assert status_codes.count(201) == stock
     assert status_codes.count(409) == concurrent_requests - stock
-    # ve veritabanındaki son stok tam olarak 0
 ```
 
-300 isteğin tam 50'si başarılı oluyor, 250'si "stok tükendi" cevabı alıyor ve
-son stok 0'da kalıyor. Test gerçek bir PostgreSQL üzerinde çalışıyor, çünkü
-satır kilidi davranışı SQLite ile sınanamıyor.
+Test 300 isteği aynı anda gönderiyor. Beklenen sonuç tam 50 başarılı satış
+(`201`), 250 reddedilen istek (`409`) ve veritabanında 0 stok. Test gerçek bir
+PostgreSQL üzerinde çalışıyor; satır kilidi davranışı SQLite ile
+sınanamadığı için bu bilinçli bir tercih.
 
-## Neden async?
+## Asenkron yapı
 
-Bu iş yükünde zamanın büyük kısmı veritabanını beklemekle geçiyor. Senkron
-kodda bekleyen her istek bir iş parçacığını meşgul ediyor ve havuz hızla
-doluyor. Async SQLAlchemy ve asyncpg ile tek bir olay döngüsü, bir istek
-veritabanını beklerken diğerlerini işlemeye devam ediyor. Kısa süreli ani yük
-için doğru model bu.
+Bu iş yükünde zamanın büyük bölümü veritabanı cevabını beklemekle geçiyor.
+Senkron bir yapıda bekleyen her istek bir iş parçacığını meşgul eder ve havuz
+kısa sürede dolar. Async SQLAlchemy ve asyncpg ile tek bir olay döngüsü, bir
+istek beklerken diğerlerini işlemeye devam ediyor. Kısa süreli ani yük
+senaryoları için uygun model bu.
 
-## Bilerek yapmadıklarım
+## Kapsam
 
-Kimlik doğrulama ve ödeme adımı yok. Gerçek hayatta stok önce rezerve edilir,
-ödeme tamamlanmazsa geri bırakılır. Tablolar açılışta oluşturuluyor; şema
-değişiklikleri için migration aracı (Alembic) eklenmeli.
-
-## Öğrendiklerim
-
-Eşzamanlılık hatalarını "dikkatli kod yazarak" değil, **işi veritabanına
-bırakarak** çözmeyi öğrendim. Veritabanı satır kilidi konusunda benim
-yazabileceğim herhangi bir kilitten daha güvenilir. İkinci ders: bu tür bir
-garanti ancak eşzamanlı istek gönderen bir testle kanıtlanır. Tek tek istek
-gönderen test her zaman geçer.
+Proje yalnızca eşzamanlılık sorununa odaklanıyor. Kimlik doğrulama ve ödeme
+adımı yok; gerçek bir sistemde stok önce rezerve edilir, ödeme tamamlanmazsa
+serbest bırakılır. Tablolar uygulama açılışında oluşturuluyor; şema
+değişiklikleri için Alembic gibi bir migration aracı eklenmesi gerekir.

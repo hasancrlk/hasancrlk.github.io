@@ -1,7 +1,7 @@
 ---
-title: "Why asyncio and not threading? A concurrent port scanner from scratch"
+title: "I used nmap, then I wrote my own port scanner"
 kisa: A scanner that finds open TCP ports concurrently, guesses the service from its banner and refuses unauthorised targets.
-ozet: "I rewrote the most-used slice of nmap, TCP connect scanning and banner grabbing, in my own code. This post is about two decisions: why asyncio, and how the tool protects itself from misuse."
+ozet: "I had worked with nmap before. In this project I wrote its most-used part, TCP connect scanning and banner grabbing, from scratch with asyncio, and added a scope gate to prevent misuse."
 date: 2026-09-18
 teknolojiler: [Python, asyncio, FastAPI, SQLAlchemy, argparse, Docker]
 repo: https://github.com/hasancrlk/port-tarayici
@@ -10,103 +10,90 @@ sira: 4
 ref: portscout
 ---
 
-## The problem
+Before this project I knew port scanning as an nmap user: type the command,
+read the output. Doing the same job in my own code showed me which network
+behaviour sits behind every word in that output.
 
-Every service on a server listens on a port: SSH on 22, the web on 80 and
-443, PostgreSQL on 5432. A port left open for no reason is a door. A port
-scanner finds those doors. I did not set out to replace `nmap`. I wanted to
-write its most common part from scratch and really understand how it works.
+PortScout was not written to replace nmap but to understand its most commonly
+used part: TCP connect scanning and reading the first line a service sends
+to introduce itself (the banner).
 
 ```
 $ python -m cli scan 127.0.0.1 -p top100
 PORT    STATE     SERVICE    PRODUCT / BANNER
---------------------------------------------------------------
 22      open      ssh        OpenSSH/SSH: OpenSSH_9.6
 ```
 
-## Decision 1: Why asyncio?
+## The concurrency model
 
-Port scanning is almost entirely **waiting**. A socket either completes the
-handshake or sits idle until the timeout. The CPU does almost nothing.
+Port scanning is mostly waiting. Each connection either completes the
+handshake or waits for a reply until the timeout; the CPU does almost nothing
+in the meantime. `asyncio` was chosen for this workload.
 
-| | Thread pool | asyncio |
-|---|---|---|
-| Cost per task | ~1 MB stack | ~1 KB |
-| 5,000 ports | Pool stays at 50–200 | 5,000 coroutines, no problem |
-| Timeouts | `future.result(timeout=)` does **not** free the thread | `asyncio.wait_for` actually cancels the task |
+The deciding factor was how timeouts are handled. In a thread pool,
+`future.result(timeout=...)` stops waiting but does not free the thread; it
+keeps occupying a slot until the OS closes the connection. On an
+unresponsive host this fills the pool quickly. `asyncio.wait_for` cancels the
+coroutine and the slot is freed immediately.
 
-The last row decided it. In a thread pool, a connection that times out keeps
-occupying a slot until the OS closes the socket. On a host that drops packets
-(filtered), the whole pool clogs, and that is the most common case while
-scanning. `asyncio.wait_for` cancels the coroutine and frees the slot
-immediately.
+Concurrency is not unlimited. Without an `asyncio.Semaphore`, thousands of
+connections would try to open at once: locally they hit the file descriptor
+limit, and on the other side they resemble a SYN flood. The default is 200
+concurrent connections, adjustable with `--concurrency`.
 
-A rough measurement: 1,000 ports on an unresponsive host, 1 s timeout, 200
-concurrent connections → about **5 seconds**. Serially it would take about
-1,000 seconds.
+As a rough measurement: 1,000 ports on an unresponsive host, a 1-second
+timeout and 200 concurrent connections complete in about 5 seconds.
 
-**Why not unlimited?** Without a `Semaphore`, 65,535 connections start at
-once. Locally you get `too many open files`. On the other side it looks like a
-SYN flood, so the tool accidentally becomes a denial-of-service attack. The
-default is 200 concurrent connections.
+## Three port states
 
-## Three states: open, closed, filtered
+The scanner reports one of three states for each port:
 
-Simple scanners say "not open means closed". That throws information away:
+- **open:** the TCP handshake completed; something is listening.
+- **closed:** the other side sent `RST`. The host is up but nothing listens
+  on this port.
+- **filtered:** no answer at all. There may be a firewall in between, or the
+  host may be down.
 
-| State | What happened | Meaning |
-|---|---|---|
-| open | Handshake completed | Something is listening |
-| closed | Got an `RST` | **Host is up**, nothing on that port |
-| filtered | No answer at all | Firewall in between, or host down |
-
-If every port comes back `filtered`, the tool does not say "all closed". It
-reports that the host was unreachable.
+The difference between `closed` and `filtered` matters during
+reconnaissance. If every port comes back `filtered`, the tool adds a note
+that the host could not be reached instead of saying "all closed".
 
 ## Banner grabbing
 
-Services like SSH, SMTP and FTP introduce themselves as soon as you connect,
-so reading is enough. HTTP waits for a request, so known web ports get a tiny
-`HEAD /`. That is the only thing ever sent. The tool never attempts an
+Services like SSH, SMTP and FTP send a greeting line as soon as a connection
+is made; reading it is enough. HTTP waits for a request, so known web ports
+receive only a `HEAD /`. The text is mapped to a product (OpenSSH, Postfix,
+nginx, Redis and so on) with a lookup table. The tool never attempts any
 exploit.
 
-An easy-to-miss detail: banners are **stripped of control characters** before
-printing. Writing a raw banner to the terminal would let a malicious server
-send ANSI escape sequences that rewrite your terminal output and log files.
+Banner text is stripped of control characters before it is printed. If raw
+text went straight to the terminal, a server sending ANSI escape sequences
+could alter the terminal output and log files.
 
-## Decision 2: How does the tool protect itself?
+## The scope gate
 
-Unauthorised port scanning can be a crime. Instead of writing that in the
-README and moving on, I put it in the code: **with the default config, no
-internet target can be scanned.**
+Unauthorised port scanning can be a criminal offence. So the rule was not
+left as a warning in the README; it was put into the code: **with the default
+configuration, no target on the internet can be scanned.**
 
-```
-target → resolve to IP
-  ├─ name on the allowlist?      ─┐
-  ├─ IP local/private?           ─┼─ yes → SCAN
-  └─ SCAN_ALLOW_PUBLIC=true?     ─┘
-                          no → 403 / exit code 3
-```
+A target can be scanned only if one of these holds:
 
-Three deliberate details:
+1. Its name is on the allowlist (`SCAN_ALLOWLIST`).
+2. It resolves to a local or private IP address.
+3. `SCAN_ALLOW_PUBLIC=true` has been set deliberately.
 
-1. **Both name and IP are checked.** Checking only the name could be bypassed
-   with a domain that resolves to an internal IP.
-2. **The gate sits in front of the engine.** CLI and API go through the same
-   service layer. Calling the API directly with `curl` hits the same check.
-3. **Opening it up is a conscious act.** The comment next to the setting in
-   `.env` reminds you to get written permission.
+Both the name and the resolved IP are checked. The gate sits in front of the
+scan engine; the CLI and the REST API go through the same service layer, so
+someone calling the API directly faces the same check. An out-of-scope
+target is rejected with exit code 3 on the CLI and 403 on the API.
 
-## What I deliberately left out
+## Deliberately not included
 
-Only TCP connect scanning. SYN scanning needs admin rights, and connect scans
-show up in the target's logs as full connections, so they are noisy. No UDP,
-no TLS handshake. I **deliberately** did not add IDS-evasion timing profiles
-like `nmap -T0`.
+- **SYN scanning:** needs raw sockets and admin rights.
+- **UDP scanning:** meaningful results need service-specific packets.
+- **TLS handshake:** 443 shows as open but certificate data isn't read.
+- **Timing profiles:** detection-evasion profiles like nmap's `-T0` were not
+  added.
 
-## What I learned
-
-I learned the answer to "why asyncio?" from timeout behaviour, not from a
-comparison table. The second big lesson: the ethical boundary of an offensive
-tool belongs in the code, not in the docs. Users don't read READMEs, but they
-do hit gates.
+The project ships with 38 tests. Results are saved to SQLite or PostgreSQL
+and previous scans can be listed with `python -m cli list`.

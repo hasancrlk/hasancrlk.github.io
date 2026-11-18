@@ -1,7 +1,7 @@
 ---
-title: "Parmağını ekrana koy: çoklu dokunmayla rastgele seçici Kararsız"
-kisa: Herkes parmağını ekrana koyar, uygulama geri sayımla birini rastgele seçer. Expo ve React Native ile çoklu dokunma.
-ozet: "Kimin bulaşık yıkayacağına karar veremeyen arkadaş grupları için küçük bir mobil oyun yaptım. Küçük ama çoklu dokunmayı ve React'teki bayat durum tuzağını öğreten bir proje oldu."
+title: "Yurtta yemeği kim alacak? Kararsız uygulamasının hikâyesi"
+kisa: Herkes parmağını ekrana koyar, uygulama geri sayımla birini rastgele seçer. KYK yurdundaki bir ihtiyaçtan doğdu.
+ozet: "KYK yurdunda dışarıdan yemek söylediğimizde birinin güvenliğe inip siparişi alması gerekiyordu. Kimin ineceğine bu uygulamayla karar veriyorduk."
 date: 2026-08-08
 teknolojiler: [React Native, Expo, expo-router, expo-haptics, TypeScript]
 repo: https://github.com/hasancrlk/Kararsiz
@@ -10,24 +10,31 @@ sira: 9
 ref: kararsiz
 ---
 
-## Fikir
+KYK yurdunda dışarıdan yemek söylediğimizde sipariş odaya kadar gelmiyordu;
+birinin güvenliğe inip alması gerekiyordu. Kimin ineceğine karar vermek için
+bu uygulamayı yazdım. Herkes parmağını telefonun ekranına koyuyor, kısa bir
+geri sayımdan sonra uygulama bir parmağı seçiyor ve aşağı inecek kişi
+belli oluyor.
 
-"Kim ödeyecek?", "ilk kim başlayacak?" Herkes parmağını telefonun ekranına
-koyar, kısa bir geri sayımdan sonra uygulama bir parmağı seçer. Seçilen
-parmağın halkası büyür ve telefon titrer.
+Uygulamanın adı da bu kullanımdan geliyor: bir seçim yapmanız gerektiğinde
+ama kararsız kaldığınızda, seçenekleri parmaklara paylaştırıp sonucu
+uygulamaya bırakabiliyorsunuz.
 
-1. **Başla**'ya basılır.
-2. 2 ile 10 kişi parmağını ekrana koyar.
-3. İkinci parmak değdiği anda 3 saniyelik geri sayım başlar. Her saniyede
-   titreşim var.
-4. Geri sayım bitince bir parmak rastgele seçilir.
-5. Herkes parmağını çekince oyun sıfırlanır.
+## Nasıl çalışıyor
 
-## Her parmağı ayrı takip etmek
+1. **Başla** düğmesine basılıyor.
+2. 2 ile 10 kişi parmağını ekrana koyuyor.
+3. İkinci parmak ekrana değdiği anda 3 saniyelik geri sayım başlıyor ve her
+   saniyede telefon titriyor.
+4. Geri sayım bitince parmaklardan biri rastgele seçiliyor. Seçilen parmağın
+   halkası büyüyor ve telefon sürekli titriyor.
+5. Herkes parmağını çektiğinde oyun sıfırlanıyor.
 
-Ekrandaki her dokunuşun bir `identifier` değeri var. Parmakları bu kimlikle
-bir `Map` içinde tutuyorum. Parmak hareket ederse yalnızca koordinatı
-güncelleniyor, yeni bir parmak gelirse renk atanıp listeye ekleniyor:
+## Parmakların takibi
+
+Ekrandaki her dokunuşun benzersiz bir `identifier` değeri var. Parmaklar bu
+değerle bir `Map` içinde tutuluyor. Hareket eden parmağın yalnızca konumu
+güncelleniyor; yeni gelen parmağa bir renk atanıyor:
 
 ```tsx
 touches.forEach((t) => {
@@ -41,41 +48,35 @@ touches.forEach((t) => {
 });
 ```
 
-Geri sayım sırasında biri parmağını çekerse ve ekranda hâlâ en az iki kişi
-varsa geri sayım baştan başlıyor. İkiden az kişi kalırsa iptal ediliyor. Son
-parmak da kalkınca her şey sıfırlanıyor.
+Geri sayım sırasında bir parmak kalkar ve ekranda hâlâ en az iki parmak
+varsa geri sayım baştan başlıyor. İkiden az parmak kalırsa sayım iptal
+ediliyor.
 
-## Bayat durum tuzağı
+## Durumun güncel okunması
 
-Projenin bana öğrettiği asıl şey buydu. Dokunma işleyicileri `useCallback`
-ile bir kez oluşturuluyor. İçlerinde `phase` durumunu okursam, fonksiyonun
-oluşturulduğu andaki değeri görüyorlar. Buna React'te "bayat kapanış" (stale
-closure) deniyor. Sonuç: geri sayım başlamış olmasına rağmen işleyici hâlâ
-"boştayım" sanıp ikinci bir geri sayım başlatabiliyordu.
+Dokunma işleyicileri `useCallback` ile bir kez oluşturuluyor. İçlerinde
+doğrudan `phase` durumu okunursa, işleyicinin oluşturulduğu andaki değer
+görülür. React'te bu durum "bayat kapanış" (stale closure) olarak bilinir ve
+geri sayım devam ederken ikinci bir geri sayımın başlamasına yol açabilir.
 
-Çözüm, durumu bir de `useRef` içinde tutmak. Ekranı çizen `phase` durumu,
-işleyicilerin okuduğu ise her zaman güncel olan `phaseRef.current`:
+Bu nedenle oyun aşaması bir `useRef` içinde de tutuluyor. Ekranı çizen
+`phase` durumu, işleyicilerin okuduğu ise her zaman güncel olan
+`phaseRef.current`:
 
 ```tsx
 const [phase, setPhase] = useState<'idle' | 'countdown' | 'selected'>('idle');
 const phaseRef = useRef<'idle' | 'countdown' | 'selected'>('idle');
-// ...
+
 if (updated.size >= 2 && phaseRef.current === 'idle') {
   startCountdown(updated);
 }
 ```
 
-## Dokunsal geri bildirim
+## Titreşim
 
-`expo-haptics` ile geri sayımın her saniyesinde orta şiddette titreşim, seçim
-anında "başarı" titreşimi ve kazanan parmak ekranda kaldıkça tekrarlayan güçlü
-bir titreşim var. Telefon masada dururken bile sonucun hissedilmesi oyunu
-eğlenceli yapan şey.
+`expo-haptics` ile geri sayımın her saniyesinde orta şiddette bir titreşim,
+seçim anında bir başarı titreşimi ve kazanan parmak ekranda kaldığı sürece
+tekrarlayan güçlü bir titreşim veriliyor. Telefon masanın ortasında dururken
+sonucun hissedilmesi oyunun en önemli parçası.
 
-## Öğrendiklerim
-
-Küçük bir oyun, React'in zamanlama modelini öğrenmek için en iyi yerlerden
-biri çıktı. Olay işleyicileri, zamanlayıcılar ve durum aynı anda
-değiştiğinde "hangi değeri görüyorum?" sorusu kritik hâle geliyor. Bir de
-çoklu dokunmanın web'de ve mobilde farklı davrandığını, gerçek cihazda
-denemeden emin olunamayacağını öğrendim.
+Uygulamayı gerçek telefonda ilk denediğimizde sonuç hoşuma gitti.

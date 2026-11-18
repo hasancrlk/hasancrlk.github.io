@@ -1,7 +1,7 @@
 ---
-title: "Speed or politeness? The silent-incomplete-results trap in subdomain enumeration"
+title: "Rate limits and wildcard DNS in subdomain enumeration"
 kisa: A tool that discovers subdomains via DNS, rate-limits itself and filters out wildcard false positives.
-ozet: "I built a tool that finds subdomains like admin., vpn. and test. under a domain. The most interesting problem came from an unexpected place: when the tool is too fast, it does not fail. It silently returns fewer results."
+ozet: "A tool that finds subdomains like admin., vpn. and test. under a domain using DNS queries. The post focuses on two topics: how rate limiting affects the accuracy of results, and the false positives created by wildcard DNS."
 date: 2026-09-18
 teknolojiler: [Python, asyncio, dnspython, FastAPI, SQLAlchemy, Docker]
 repo: https://github.com/hasancrlk/alt-alan-adi-kesif-araci
@@ -10,16 +10,20 @@ sira: 5
 ref: subhound
 ---
 
-## The problem
+I first came across wildcard DNS records in my Computer Networks course. At
+the time it looked like a configuration detail. In this project it turned out
+to be something that can make a reconnaissance tool's results meaningless.
 
-An organisation doesn't just have `company.com`. Over time dozens of
-subdomains pile up, like `admin.company.com`, `vpn.company.com` and
-`test.company.com`, and some get forgotten. An unpatched test server stays
-online. The attacker's reconnaissance starts by finding exactly these names.
-Defenders should build the same list themselves.
+## What the tool does
 
-The method is simple: turn 300+ common labels (`admin`, `api`, `mail`…) into
-`<label>.company.com` and ask DNS.
+Over time, dozens of subdomains pile up under an organisation's main domain:
+`admin.`, `vpn.`, `test.`, `api.`. Some get forgotten, and servers that are no
+longer patched stay reachable. Mapping the attack surface starts with finding
+these names. In bug bounty programmes and CTFs, it is usually the first step
+of reconnaissance as well.
+
+The tool turns 300+ common labels from a built-in list into
+`<label>.domain.com` and queries their A, AAAA and CNAME records:
 
 ```
 $ python -m cli enumerate example.com
@@ -28,77 +32,64 @@ Found        : 4 live (12 wildcard filtered)
    api.example.com      A       93.184.216.35
 *  admin.example.com    A       93.184.216.36
    mail.example.com     CNAME   ghs.googlehosted.com
+   www.example.com      A       93.184.216.34
 ```
 
-## Hard part: Two separate knobs
+## Why rate limiting is about accuracy
 
-You need to run thousands of DNS queries fast without overwhelming the
-resolver. The key insight was that these are **two different** questions:
+`asyncio` runs thousands of queries quickly. There are two separate settings:
 
-| Question | Tool | Default |
-|---|---|---|
-| How many queries in flight at once? | `asyncio.Semaphore` | 50 |
-| How many queries per second? | Token bucket | 100/s |
+- **Concurrency:** how many queries are pending at the same time. Limited
+  with `asyncio.Semaphore`, default 50.
+- **Rate:** how many queries are sent per second. Limited with a token
+  bucket, default 100 per second.
 
-Limiting concurrency alone is not enough. If each of 50 concurrent queries
-takes 5 ms, that is 10,000 queries per second. Most public resolvers throttle
-you at that rate, and **the throttling is silent**. Queries that return
-`SERVFAIL` or `REFUSED` look like "not found" in the code. The scan finishes,
-the list is short, and nobody realises anything went wrong. A tool that
-crashes is far less dangerous than one that quietly returns incomplete
-results.
+Limiting concurrency alone is not enough. If each of 50 queries takes a few
+milliseconds, the per-second count reaches thousands. Most public DNS
+resolvers throttle a client at that rate, and they do it not by raising an
+error but by returning `SERVFAIL` or `REFUSED`. In the code those answers
+look the same as "no record". The scan completes without errors, but the list
+is incomplete.
 
-### Why a token bucket?
-
-Sleeping a fixed `1/rate` between queries is simple but rigid. A token bucket
-allows short bursts while keeping the long-term average, which suits DNS,
-because resolvers typically look at the per-second average.
+A token bucket allows short bursts while keeping the long-term average,
+unlike a fixed sleep between queries. Waiting happens outside the lock, so a
+slow task does not stall the whole queue.
 
 ```python
 self._tokens = min(capacity, self._tokens + elapsed * rate)
 ```
 
-The waiting happens **outside** the lock. Holding the lock while waiting would
-let one slow task stall the entire queue.
+## Wildcard DNS
 
-## Wildcard DNS: 300 fake "found"s
+If a domain defines a record for `*.example.com`, every non-existent name
+gets an answer too. A tool that doesn't notice this reports "found" for every
+word in the list.
 
-Some domains define a record for `*.company.com`. On such a domain **every**
-query gets an answer. A tool that doesn't notice produces 300 "found" entries
-from a 300-line list, all garbage.
+Before scanning, the tool queries three randomly generated names
+(`subhound-<16 hex>.example.com`). If all three answer, the domain is assumed
+to have a wildcard and the returned IP set is recorded. Results whose IP set
+matches it **exactly** are flagged as wildcard.
 
-```
-1. Ask for 3 random names:    subhound-<16 hex>.company.com
-2. All of them answer         → wildcard present, record the IP set
-3. Any of them is empty       → no wildcard
-4. Flag findings whose IP set matches exactly
-```
-
-Two deliberate decisions:
-
-- **Why an exact match?** A real subdomain can live on the same server as the
-  wildcard, for example behind the same reverse proxy. Partial matching would
-  throw away real findings.
-- **Why flag instead of delete?** Filtered records are kept and stamped
-  `is_wildcard`. `--show-wildcard` reveals them. "I found this but filtered
-  it, have a look if you want" beats throwing it away silently.
+Exact matching is used instead of partial matching because a real subdomain
+can live on the same server as the wildcard. Filtered results are not deleted;
+they are flagged `is_wildcard` and can be shown with `--show-wildcard`.
 
 ## Diff report
 
-When a domain is rescanned, subdomains that were not in the previous scan are
-marked with `*`. A team running this regularly sees a forgotten new server on
-day one.
+When a domain is scanned again, subdomains that were not in the previous scan
+are marked with `*`. Run regularly, this makes a newly exposed server easy to
+spot.
 
-## What I deliberately left out
+## Scope and limits
+
+Enumeration should only be done on domains you own or are authorised to test.
+That is why the tool is rate-limited by default.
 
 In real reconnaissance, Certificate Transparency logs and passive DNS are
-more productive than a wordlist. I did not add them. Some tools try a zone
-transfer (`AXFR`); I **deliberately** left it out because it sits close to the
-authorisation line. There is no subdomain-takeover check either.
+more productive than a wordlist; they were not added. A zone transfer
+(`AXFR`) attempt was deliberately left out because it sits close to the
+authorisation line. There is also no subdomain-takeover check and no punycode
+conversion for internationalised domain names.
 
-## What I learned
-
-The most valuable lesson: the most dangerous failure mode of a tool is silent
-incompleteness. A crashing program gets noticed. A program that returns a
-partial list inspires confidence and misleads. The rate limit looked like a
-"politeness" feature. It turned out to be a correctness feature.
+The project ships with 42 tests; the CLI and the REST API share the same
+engine.
