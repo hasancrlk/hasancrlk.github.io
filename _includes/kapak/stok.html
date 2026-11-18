@@ -1,0 +1,18 @@
+{%- comment -%} Sayılar testten: 50 stok, 300 eşzamanlı istek, 50 × 201, 250 × 409, son stok 0. {%- endcomment -%}
+<div class="st-vitrin" aria-hidden="true">
+  <div class="st-serit">{% if include.L == "en" %}FLASH SALE{% else %}FLAŞ İNDİRİM{% endif %} · {% if include.L == "en" %}FLASH SALE{% else %}FLAŞ İNDİRİM{% endif %} · {% if include.L == "en" %}FLASH SALE{% else %}FLAŞ İNDİRİM{% endif %} · {% if include.L == "en" %}FLASH SALE{% else %}FLAŞ İNDİRİM{% endif %} · </div>
+  <div class="st-ic">
+    <div class="st-urun">
+      <p class="st-ad">{% if include.L == "en" %}Game Console X{% else %}Oyun Konsolu X{% endif %}</p>
+      <div class="st-sayac"><span class="st-sayi"></span><small>/ 50 {% if include.L == "en" %}in stock{% else %}stokta{% endif %}</small></div>
+      <div class="st-cubuk"><i></i></div>
+    </div>
+    <div class="st-istekler">
+      <p><b>300</b> {% if include.L == "en" %}concurrent requests{% else %}eşzamanlı istek{% endif %}</p>
+      <p class="yesil"><b>50</b> × 201 Created</p>
+      <p class="kirmizi"><b>250</b> × 409 Conflict</p>
+      <p class="sql">UPDATE items SET stock = stock - 1<br>WHERE id = :id AND stock &gt;= 1</p>
+    </div>
+  </div>
+</div>
+<p class="kapak-etiket">{% if include.L == "en" %}Final stock: 0. Never −1.{% else %}Son stok: 0. Asla −1 değil.{% endif %}</p>

@@ -1,0 +1,17 @@
+{%- comment -%} Satırlar depodaki data/sample-auth.log dosyasından alındı. {%- endcomment -%}
+<div class="aw-ekran" aria-hidden="true">
+  <div class="aw-bar"><span></span><span></span><span></span><b>/var/log/auth.log — srv01</b></div>
+  <pre class="aw-log"><span class="ok">Sep 17 08:15:00 srv01 sshd[5100]: Accepted password for deniz from 198.51.100.7</span>
+<span class="f">Sep 17 03:12:01 srv01 sshd[4101]: Failed password for invalid user admin from 203.0.113.5</span>
+<span class="f">Sep 17 03:12:04 srv01 sshd[4102]: Failed password for invalid user oracle from 203.0.113.5</span>
+<span class="f">Sep 17 03:12:07 srv01 sshd[4103]: Failed password for root from 203.0.113.5</span>
+<span class="f">Sep 17 03:12:10 srv01 sshd[4104]: Failed password for invalid user postgres from 203.0.113.5</span>
+<span class="f son">Sep 17 03:12:13 srv01 sshd[4105]: Failed password for invalid user test from 203.0.113.5</span></pre>
+  <div class="aw-alarm">
+    <span class="aw-rozet">{% if include.L == "en" %}ALERT{% else %}ALARM{% endif %} · brute_force</span>
+    <strong>203.0.113.5</strong>
+    <span class="aw-guven">{% if include.L == "en" %}confidence{% else %}güven{% endif %} <b>0.95</b> · high</span>
+    <span class="aw-pencere"><i style="--n:1"></i><i style="--n:2"></i><i style="--n:3"></i><i style="--n:4"></i><i style="--n:5"></i></span>
+  </div>
+</div>
+<p class="kapak-etiket">{% if include.L == "en" %}Sliding window · 5 attempts / 12 s{% else %}Kayan pencere · 12 saniyede 5 deneme{% endif %}</p>

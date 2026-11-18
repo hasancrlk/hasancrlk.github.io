@@ -8,7 +8,16 @@ layout: default
   Medium "Import a story" yalnızca <article> içini alıyor. Gezinme bağlantısı ve
   düğme bu yüzden dışarıda; künye düz paragraf (Medium <dl> satırlarını düşürüyordu).
 {%- endcomment -%}
-<p class="ust-bilgi yazi-ust"><a href="{{ ana | relative_url }}#projeler">{{ t.geri }}</a></p>
+{%- comment -%}
+  Her projenin kendi kapağı var: _includes/kapak/<ref>.html. Kapak içerikten
+  gelir (gerçek log satırları, portlar, alan adları); <article> dışında durur,
+  Medium'a taşınmaz.
+{%- endcomment -%}
+{%- assign kapak = "kapak/" | append: page.ref | append: ".html" -%}
+<div class="kapak">
+  <p class="ust-bilgi yazi-ust"><a href="{{ ana | relative_url }}#projeler">{{ t.geri }}</a></p>
+  {% include {{ kapak }} L=L %}
+</div>
 <article class="yazi">
   <h1>{{ page.title }}</h1>
   <p class="lede">{{ page.ozet }}</p>

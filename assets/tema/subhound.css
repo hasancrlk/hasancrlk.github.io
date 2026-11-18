@@ -1,0 +1,35 @@
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@500;700&family=Fira+Code:wght@400;600&display=swap");
+
+/* DNS haritası: mavi kopya (blueprint) zemin, camgöbeği dallar */
+body.tema-subhound {
+  --zemin: #f3f7fa; --yuzey: #ffffff; --metin: #14232f; --soluk: #557083; --cizgi: #d4e1ea;
+  --vurgu: #0b7a8f; --vurgu-acik: #dcf0f3; --kod-zemin: #eaf2f6;
+  color-scheme: light;
+}
+.tema-subhound .yazi h1, .tema-subhound .yazi h2 { font-family: "Sora", system-ui, sans-serif; letter-spacing: -0.02em; }
+.tema-subhound pre, .tema-subhound code { font-family: "Fira Code", monospace; }
+.tema-subhound .kapak {
+  background-color: #0d3b52;
+  background-image: linear-gradient(#ffffff10 1px, transparent 1px), linear-gradient(90deg, #ffffff10 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: #e3f4fa;
+}
+.tema-subhound .kapak .ust-bilgi a { color: #e3f4fa; }
+
+.sh-agac { margin-top: 10px; }
+.sh-agac svg { width: 100%; height: auto; display: block; }
+.sh-agac text { font: 600 14px "Fira Code", monospace; text-anchor: middle; fill: #e3f4fa; }
+.sh-agac .ip { font-weight: 400; font-size: 11px; fill: #8fc3d6; }
+.sh-agac .kollar path { fill: none; stroke: #5fd0e4; stroke-width: 1.5; stroke-dasharray: 600; stroke-dashoffset: 600; animation: sh-ciz 1.2s .1s forwards; }
+.sh-agac .kollar .wc { stroke: #5fd0e455; stroke-dasharray: 4 6; animation: none; stroke-dashoffset: 0; }
+@keyframes sh-ciz { to { stroke-dashoffset: 0; } }
+.sh-agac .kok rect { fill: #5fd0e4; }
+.sh-agac .kok text { fill: #072535; font-size: 15px; }
+.sh-agac .yaprak { opacity: 0; animation: sh-gel .4s var(--g) forwards; }
+.sh-agac .yaprak rect { fill: #0f4a66; stroke: #5fd0e4; stroke-width: 1.2; }
+.sh-agac .yeni rect { fill: #5fd0e4; }
+.sh-agac .yeni text:first-of-type { fill: #072535; }
+.sh-agac .sahte rect { fill: none; stroke: #5fd0e455; stroke-dasharray: 3 4; }
+.sh-agac .sahte text { fill: #8fc3d688; text-decoration: line-through; }
+@keyframes sh-gel { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.tema-subhound .kapak-etiket { color: #8fc3d6; opacity: 1; }

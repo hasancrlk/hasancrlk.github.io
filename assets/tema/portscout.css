@@ -1,0 +1,32 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Space+Grotesk:wght@500;700&display=swap");
+
+/* Radar: koyu yeşil-siyah, fosfor yeşili tarama */
+body.tema-portscout {
+  --zemin: #070d0a; --yuzey: #0c1611; --metin: #d4ecdf; --soluk: #7fa18f; --cizgi: #16291f;
+  --vurgu: #39ff9e; --vurgu-acik: #0f2a1d; --kod-zemin: #08120d;
+  --kapak-zemin: #040806;
+  color-scheme: dark;
+}
+.tema-portscout .ust { background: #040806; }
+.tema-portscout .yazi h1, .tema-portscout .yazi h2 { font-family: "Space Grotesk", system-ui, sans-serif; letter-spacing: -0.02em; }
+.tema-portscout .yazi h2 { color: #b9ffd9; }
+.tema-portscout pre, .tema-portscout code { font-family: "Space Mono", monospace; }
+.tema-portscout .dugme { color: #04130b; }
+.tema-portscout .kapak { background: radial-gradient(circle at 25% 40%, #0c2418, #040806 60%); }
+
+.ps-sahne { display: grid; grid-template-columns: minmax(200px, 300px) 1fr; gap: 32px; align-items: center; margin-top: 16px; }
+@media (max-width: 640px) { .ps-sahne { grid-template-columns: 1fr; } .ps-radar { max-width: 260px; } }
+.ps-radar svg { width: 100%; overflow: visible; }
+.ps-radar .halka { fill: none; stroke: #1d4d34; stroke-width: 1; }
+.ps-radar .supurge { transform-origin: 150px 150px; animation: ps-don 4s linear infinite; }
+@keyframes ps-don { to { transform: rotate(360deg); } }
+.ps-radar .nokta { opacity: 0; animation: ps-yan .6s var(--g) forwards; }
+.ps-radar .nokta circle { fill: #39ff9e; filter: drop-shadow(0 0 6px #39ff9e); }
+.ps-radar .nokta text { fill: #b9ffd9; font: 12px "Space Mono", monospace; }
+.ps-radar .kapali circle { fill: #e0b04a; filter: none; }
+.ps-radar .kapali text { fill: #e0b04a; }
+@keyframes ps-yan { from { opacity: 0; } to { opacity: 1; } }
+.ps-cikti { margin: 0; background: #08120dcc; border: 1px solid #1d4d34; color: #9ff0c4; font: 13px/1.7 "Space Mono", monospace; }
+.ps-cikti .imlec { animation: ps-imlec 1s steps(1) infinite; color: #39ff9e; }
+@keyframes ps-imlec { 50% { opacity: 0; } }
+.tema-portscout .kapak-etiket { color: #39ff9e; }

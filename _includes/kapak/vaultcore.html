@@ -1,0 +1,21 @@
+<div class="vc-sahne" aria-hidden="true">
+  <svg class="vc-kilit" viewBox="0 0 200 200">
+    <circle cx="100" cy="100" r="92" class="dis"/>
+    <g class="kadran">
+      <circle cx="100" cy="100" r="70" class="ic"/>
+      {%- for i in (0..23) -%}
+      <line x1="100" y1="34" x2="100" y2="{% assign m = i | modulo: 3 %}{% if m == 0 %}46{% else %}40{% endif %}" transform="rotate({{ i | times: 15 }} 100 100)"/>
+      {%- endfor -%}
+    </g>
+    <circle cx="100" cy="100" r="18" class="gobek"/>
+    <path d="M100 6 l6 10 h-12z" class="isaret"/>
+  </svg>
+  <div class="vc-akis">
+    <div><span>{% if include.L == "en" %}password{% else %}parola{% endif %}</span><code>••••••••••••</code></div>
+    <div><span>Argon2id</span><code>64 MB · t=3 · p=4</code></div>
+    <div><span>salt</span><code>3f9a1c07e2b84d55…</code></div>
+    <div><span>nonce</span><code>b71e09d4a2c3…</code></div>
+    <div><span>AES-256-GCM</span><code class="sifreli">8c1f e07a 4b92 d3c5 77ae 0f18 c2b9 5d64…</code></div>
+  </div>
+</div>
+<p class="kapak-etiket">{% if include.L == "en" %}The password is never stored · one-time links · expiring files{% else %}Parola hiçbir yerde saklanmaz · tek kullanımlık bağlantı · süreli dosya{% endif %}</p>

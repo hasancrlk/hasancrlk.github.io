@@ -1,0 +1,18 @@
+{%- comment -%} Karne: oranlar ve ağırlıklar yazıdaki puanlama tablosundan. {%- endcomment -%}
+<div class="hg-karne" aria-hidden="true">
+  <div class="hg-ust">
+    <div>
+      <p class="hg-baslik">{% if include.L == "en" %}Security header report card{% else %}Güvenlik başlığı karnesi{% endif %}</p>
+      <p class="hg-site">https://example.com</p>
+    </div>
+    <div class="hg-not"><span>E</span><small>43 / 100</small></div>
+  </div>
+  <ul class="hg-liste">
+    <li><b>Content-Security-Policy</b><em class="yok">{% if include.L == "en" %}missing{% else %}yok{% endif %}</em><i style="--o:0"></i><s>0 / 22</s></li>
+    <li><b>Strict-Transport-Security</b><em class="kismi">max-age=60</em><i style="--o:.5"></i><s>9 / 18</s></li>
+    <li><b>X-Frame-Options</b><em class="tam">DENY</em><i style="--o:1"></i><s>10 / 10</s></li>
+    <li><b>X-Content-Type-Options</b><em class="tam">nosniff</em><i style="--o:1"></i><s>8 / 8</s></li>
+    <li><b>Server</b><em class="ceza">nginx/1.24.0</em><i class="eksi"></i><s>−3</s></li>
+  </ul>
+</div>
+<p class="kapak-etiket">{% if include.L == "en" %}Not "is it there?" but "does it protect?"{% else %}"Var mı?" değil, "koruyor mu?"{% endif %}</p>

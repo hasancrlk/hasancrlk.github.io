@@ -1,0 +1,21 @@
+{%- comment -%} Ağaç: yazıdaki örnek çıktıdaki alt alan adları; wildcard dalları soluk. {%- endcomment -%}
+<div class="sh-agac" aria-hidden="true">
+  <svg viewBox="0 0 720 260" preserveAspectRatio="xMidYMid meet">
+    <g class="kollar">
+      <path d="M360 52 C360 110 110 100 110 160"/>
+      <path d="M360 52 C360 110 260 100 260 160"/>
+      <path d="M360 52 C360 110 410 100 410 160"/>
+      <path d="M360 52 C360 110 560 100 560 160"/>
+      <path class="wc" d="M360 52 C360 120 660 120 660 210"/>
+      <path class="wc" d="M360 52 C360 120 40 120 40 225"/>
+    </g>
+    <g class="kok"><rect x="280" y="22" width="160" height="34" rx="17"/><text x="360" y="44">example.com</text></g>
+    <g class="yaprak" style="--g:.3s"><rect x="50" y="160" width="120" height="30" rx="6"/><text x="110" y="180">api</text><text class="ip" x="110" y="208">93.184.216.35</text></g>
+    <g class="yaprak yeni" style="--g:.6s"><rect x="200" y="160" width="120" height="30" rx="6"/><text x="260" y="180">* admin</text><text class="ip" x="260" y="208">93.184.216.36</text></g>
+    <g class="yaprak" style="--g:.9s"><rect x="350" y="160" width="120" height="30" rx="6"/><text x="410" y="180">mail</text><text class="ip" x="410" y="208">CNAME</text></g>
+    <g class="yaprak" style="--g:1.2s"><rect x="500" y="160" width="120" height="30" rx="6"/><text x="560" y="180">www</text><text class="ip" x="560" y="208">93.184.216.34</text></g>
+    <g class="yaprak sahte" style="--g:1.5s"><rect x="600" y="210" width="120" height="30" rx="6"/><text x="660" y="230">x7q1 ~</text></g>
+    <g class="yaprak sahte" style="--g:1.5s"><rect x="0" y="225" width="80" height="30" rx="6"/><text x="40" y="245">dev ~</text></g>
+  </svg>
+</div>
+<p class="kapak-etiket">{% if include.L == "en" %}* new since last scan · ~ wildcard, filtered{% else %}* önceki taramadan sonra yeni · ~ wildcard, elendi{% endif %}</p>

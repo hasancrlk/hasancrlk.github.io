@@ -1,0 +1,20 @@
+{%- comment -%} Güneş yay boyunca ilerler, panel onu takip eder; 4 LDR ve iki servo. {%- endcomment -%}
+<div class="so-sahne" aria-hidden="true">
+  <svg viewBox="0 0 640 240" preserveAspectRatio="xMidYMax meet">
+    <path d="M120 220 A200 200 0 0 1 520 220" class="yay"/>
+    <g class="gunes"><circle cx="320" cy="20" r="22"/></g>
+    <line x1="0" y1="220" x2="640" y2="220" class="ufuk"/>
+    <g transform="translate(320 220)">
+      <rect x="-6" y="-46" width="12" height="46" class="ayak"/>
+      <g class="panel"><rect x="-58" y="-62" width="116" height="16" rx="2"/><line x1="-29" y1="-62" x2="-29" y2="-46"/><line x1="0" y1="-62" x2="0" y2="-46"/><line x1="29" y1="-62" x2="29" y2="-46"/></g>
+    </g>
+  </svg>
+  <div class="so-etiketler">
+    <span>LDR {% if include.L == "en" %}left{% else %}sol{% endif %} 612</span>
+    <span>LDR {% if include.L == "en" %}right{% else %}sağ{% endif %} 540</span>
+    <span>{% if include.L == "en" %}threshold{% else %}eşik{% endif %} 30</span>
+    <span>{% if include.L == "en" %}step{% else %}adım{% endif %} 1°</span>
+    <span>MODE_SUN</span>
+  </div>
+</div>
+<p class="kapak-etiket">Arduino Uno · 4 × LDR · 2 × SG90</p>

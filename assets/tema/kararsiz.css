@@ -1,0 +1,27 @@
+@import url("https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=JetBrains+Mono:wght@400&display=swap");
+
+/* Parti masası: koyu zemin, uygulamanın renkli parmak halkaları, geri sayım */
+body.tema-kararsiz {
+  --zemin: #121218; --yuzey: #1b1b24; --metin: #efeff5; --soluk: #a1a1b5; --cizgi: #2a2a38;
+  --vurgu: #6c63ff; --vurgu-acik: #23214a; --kod-zemin: #17171f;
+  color-scheme: dark;
+}
+.tema-kararsiz .ust { background: #0d0d12; }
+.tema-kararsiz .yazi h1, .tema-kararsiz .yazi h2 { font-family: "Baloo 2", system-ui, sans-serif; font-weight: 800; letter-spacing: -0.01em; line-height: 1.15; }
+.tema-kararsiz pre, .tema-kararsiz code { font-family: "JetBrains Mono", monospace; }
+.tema-kararsiz .dugme { border-radius: 99px; }
+.tema-kararsiz .kapak { background: #0d0d12; }
+
+.kz-masa { position: relative; height: clamp(200px, 32vw, 280px); margin-top: 12px; border-radius: 22px; background: radial-gradient(circle at 50% 50%, #1f1f2b, #0d0d12 70%); border: 1px solid #ffffff10; overflow: hidden; }
+.parmak { position: absolute; left: var(--x); top: var(--y); width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; background: var(--r); box-shadow: 0 0 0 6px color-mix(in srgb, var(--r) 30%, transparent); animation: kz-bas .35s both, kz-sonuk .6s 3.4s forwards; }
+.parmak:nth-of-type(2) { animation-delay: .15s, 3.4s; } .parmak:nth-of-type(3) { animation-delay: .3s, 3.4s; }
+.parmak:nth-of-type(4) { animation-delay: .45s, 3.4s; } .parmak:nth-of-type(5) { animation-delay: .6s, 3.4s; }
+.parmak.kazanan { animation: kz-bas .35s .3s both, kz-kazan 1.4s 3.4s ease-out infinite; }
+@keyframes kz-bas { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes kz-sonuk { to { opacity: .12; transform: scale(.8); } }
+@keyframes kz-kazan { 0% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--r) 60%, transparent); } 100% { box-shadow: 0 0 0 70px transparent; } }
+.kz-sayim { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.kz-sayim span { grid-area: 1 / 1; font: 800 clamp(70px, 14vw, 120px)/1 "Baloo 2", sans-serif; color: #fff; opacity: 0; animation: kz-say 1s forwards; }
+.kz-sayim span:nth-child(1) { animation-delay: .8s; } .kz-sayim span:nth-child(2) { animation-delay: 1.8s; } .kz-sayim span:nth-child(3) { animation-delay: 2.8s; }
+@keyframes kz-say { 0% { opacity: 0; transform: scale(1.4); } 25% { opacity: .9; transform: scale(1); } 80% { opacity: .9; } 100% { opacity: 0; } }
+.tema-kararsiz .kapak-etiket { color: #c7c3ff; }

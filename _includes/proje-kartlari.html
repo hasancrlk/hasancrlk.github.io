@@ -11,7 +11,7 @@
   <h3 class="kategori">{{ t.kategoriler[k] }}</h3>
   <div class="kartlar">
     {%- for p in grup %}
-    <a class="kart" href="{{ p.url | relative_url }}">
+    <a class="kart kart-{{ p.ref }}" href="{{ p.url | relative_url }}">
       <span class="kart-baslik">{{ p.title }}</span>
       <span class="kart-ozet">{{ p.kisa }}</span>
       <span class="etiketler">{% for e in p.teknolojiler limit: 4 %}<span>{{ e }}</span>{% endfor %}</span>

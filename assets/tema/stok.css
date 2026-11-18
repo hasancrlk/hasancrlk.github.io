@@ -1,0 +1,36 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;600&family=Roboto+Mono:wght@500&display=swap");
+
+/* Flaş indirim vitrini: sarı-siyah kampanya şeridi, sıfıra inen sayaç */
+@property --st-n { syntax: "<integer>"; initial-value: 50; inherits: false; }
+body.tema-stok {
+  --zemin: #fffdf5; --yuzey: #ffffff; --metin: #141414; --soluk: #5c5a52; --cizgi: #ebe6d6;
+  --vurgu: #d9480f; --vurgu-acik: #fff1d6; --kod-zemin: #f6f2e6;
+  --kapak-zemin: #ffd43b;
+  color-scheme: light;
+  font-family: "Archivo", system-ui, sans-serif;
+}
+.tema-stok .yazi h1, .tema-stok .yazi h2 { font-family: "Archivo Black", system-ui, sans-serif; font-weight: 400; letter-spacing: -0.01em; }
+.tema-stok pre, .tema-stok code { font-family: "Roboto Mono", monospace; }
+.tema-stok .kapak { color: #141414; padding-top: 0; }
+
+.st-vitrin { max-width: none !important; margin: 0 -16px !important; }
+.st-serit { background: #141414; color: #ffd43b; font: 15px "Archivo Black", sans-serif; letter-spacing: .12em; white-space: nowrap; overflow: hidden; padding: 8px 0; animation: st-kay 14s linear infinite; }
+@keyframes st-kay { from { text-indent: 0; } to { text-indent: -60%; } }
+.st-ic { max-width: 64rem; margin: 0 auto; padding: 20px 16px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: end; }
+@media (max-width: 640px) { .st-ic { grid-template-columns: 1fr; } }
+.st-ad { margin: 0 0 4px; font: 600 15px "Archivo", sans-serif; text-transform: uppercase; letter-spacing: .08em; }
+.st-sayac { display: flex; align-items: baseline; gap: 10px; }
+.st-sayi { font: clamp(72px, 16vw, 140px)/1 "Archivo Black", sans-serif; counter-reset: n var(--st-n); animation: st-say 3.2s .4s steps(50, end) forwards; }
+.st-sayi::after { content: counter(n); }
+@keyframes st-say { to { --st-n: 0; } }
+.st-sayac small { font: 600 16px "Archivo", sans-serif; }
+.st-cubuk { height: 14px; border: 2px solid #141414; border-radius: 99px; overflow: hidden; margin-top: 10px; background: #fff7cc; }
+.st-cubuk i { display: block; height: 100%; background: #141414; animation: st-bos 3.2s .4s steps(50, end) forwards; }
+@keyframes st-bos { from { width: 100%; } to { width: 0; } }
+.st-istekler { font: 500 14px "Roboto Mono", monospace; }
+.st-istekler p { margin: 0 0 6px; }
+.st-istekler b { font-size: 18px; }
+.st-istekler .yesil b { color: #1a7f37; }
+.st-istekler .kirmizi b { color: #c92a2a; }
+.st-istekler .sql { margin-top: 12px; padding: 10px 12px; background: #141414; color: #ffd43b; border-radius: 8px; font-size: 12.5px; line-height: 1.6; }
+.tema-stok .kapak-etiket { color: #141414; opacity: .85; }

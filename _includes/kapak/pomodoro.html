@@ -1,0 +1,17 @@
+{%- comment -%} Puanlar uygulamanın kendi kurallarından: +12 / +6 / +2 / −5. {%- endcomment -%}
+<div class="pp-sahne" aria-hidden="true">
+  <div class="pp-sayac">
+    <svg viewBox="0 0 260 260">
+      <circle cx="130" cy="130" r="120" class="iz"/>
+      <circle cx="130" cy="130" r="120" class="ilerleme"/>
+    </svg>
+    <div class="pp-ic"><b>24:59</b><span>{% if include.L == "en" %}focus{% else %}odak{% endif %}</span></div>
+  </div>
+  <ul class="pp-puan">
+    <li><b>+12</b>{% if include.L == "en" %}finished without touching the phone{% else %}telefona dokunmadan bitti{% endif %}</li>
+    <li><b>+6</b>{% if include.L == "en" %}finished, phone touched{% else %}bitti ama telefona dokunuldu{% endif %}</li>
+    <li><b>+2</b>{% if include.L == "en" %}break finished{% else %}mola bitti{% endif %}</li>
+    <li class="eksi"><b>−5</b>{% if include.L == "en" %}timer cancelled{% else %}sayaç iptal edildi{% endif %}</li>
+  </ul>
+</div>
+<p class="kapak-etiket">PWA · Next.js · Zustand</p>

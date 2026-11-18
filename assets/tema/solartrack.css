@@ -1,0 +1,26 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@500;800&family=Share+Tech+Mono&display=swap");
+
+/* Gün doğumu: sabah gökyüzü, güneş yayı, onu izleyen panel */
+body.tema-solartrack {
+  --zemin: #fffaf2; --yuzey: #ffffff; --metin: #1e1a16; --soluk: #6e6359; --cizgi: #f0e3cf;
+  --vurgu: #d9480f; --vurgu-acik: #ffe9d2; --kod-zemin: #f7efe2;
+  color-scheme: light;
+}
+.tema-solartrack .yazi h1, .tema-solartrack .yazi h2 { font-family: "Manrope", system-ui, sans-serif; font-weight: 800; letter-spacing: -0.02em; }
+.tema-solartrack pre, .tema-solartrack code { font-family: "Share Tech Mono", monospace; }
+.tema-solartrack .kapak { background: linear-gradient(180deg, #ffd6a5 0%, #ffe8c7 45%, #fff3e0 100%); color: #3b2a1a; padding-bottom: 28px; }
+
+.so-sahne svg { width: 100%; height: auto; display: block; margin-top: 4px; }
+.so-sahne .yay { fill: none; stroke: #e8a15b; stroke-width: 1.5; stroke-dasharray: 3 7; }
+.so-sahne .ufuk { stroke: #c98a4b; stroke-width: 2; }
+.so-sahne .gunes { transform-box: view-box; transform-origin: 320px 220px; animation: so-yol 9s ease-in-out infinite alternate; }
+.so-sahne .gunes circle { fill: #ffb703; filter: drop-shadow(0 0 18px #fb8500); }
+@keyframes so-yol { from { transform: rotate(-70deg); } to { transform: rotate(70deg); } }
+.so-sahne .ayak { fill: #6b4f37; }
+.so-sahne .panel { transform-box: fill-box; transform-origin: 50% 100%; animation: so-egil 9s ease-in-out infinite alternate; }
+.so-sahne .panel rect { fill: #1d3557; stroke: #a8dadc; stroke-width: 1.5; }
+.so-sahne .panel line { stroke: #a8dadc; stroke-width: 1; }
+@keyframes so-egil { from { transform: rotate(-60deg); } to { transform: rotate(60deg); } }
+.so-etiketler { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.so-etiketler span { font: 13px "Share Tech Mono", monospace; padding: 4px 10px; border: 1px solid #c98a4b; border-radius: 6px; background: #fff8ee; color: #6b4f37; }
+.tema-solartrack .kapak-etiket { color: #6b4f37; opacity: 1; }

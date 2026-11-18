@@ -1,0 +1,17 @@
+{%- comment -%} Vaka dosyası: kapaktaki bulgular yazıdaki örnek taramayla aynı. {%- endcomment -%}
+<div class="fs-dosya" aria-hidden="true">
+  <div class="fs-sekme">{% if include.L == "en" %}CASE FILE{% else %}VAKA DOSYASI{% endif %} · FIM-0001</div>
+  <div class="fs-kagit">
+    <div class="fs-satir"><span>{% if include.L == "en" %}Target{% else %}Hedef{% endif %}</span><b>/var/www/html</b></div>
+    <div class="fs-satir"><span>Baseline</span><b>#1 · HMAC-SHA256 ✓</b></div>
+    <div class="fs-satir"><span>{% if include.L == "en" %}Audit chain{% else %}Denetim zinciri{% endif %}</span><b>{% if include.L == "en" %}intact{% else %}sağlam{% endif %}</b></div>
+    <table class="fs-bulgu">
+      <tr><td class="m">MODIFIED</td><td>index.html</td></tr>
+      <tr><td class="m">MODIFIED</td><td>config.php</td></tr>
+      <tr><td class="a">ADDED</td><td>shell.php</td></tr>
+    </table>
+    <div class="fs-hash">sha256 · 9f2c…e41a</div>
+  </div>
+  <div class="fs-damga">{% if include.L == "en" %}EVIDENCE{% else %}DELİL{% endif %}</div>
+</div>
+<p class="kapak-etiket">{% if include.L == "en" %}Chain of custody · signed baseline · tamper-evident log{% else %}Delil zinciri · imzalı temel kayıt · zincirli denetim kaydı{% endif %}</p>

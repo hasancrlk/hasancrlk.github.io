@@ -1,0 +1,37 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;600&display=swap");
+
+/* Kasa: gece mavisi, pirinç altını, kadranlı kilit */
+body.tema-vaultcore {
+  --zemin: #0e1424; --yuzey: #141c31; --metin: #e6e2d6; --soluk: #9aa0b3; --cizgi: #243052;
+  --vurgu: #d6b25e; --vurgu-acik: #2a2717; --kod-zemin: #111a2e;
+  --kapak-zemin: radial-gradient(ellipse at 30% 20%, #1c2a4d, #0a0f1c 70%);
+  color-scheme: dark;
+}
+.tema-vaultcore .kapak { background: radial-gradient(ellipse at 30% 20%, #1c2a4d, #0a0f1c 70%); }
+.tema-vaultcore .ust { background: #0a0f1c; }
+.tema-vaultcore .yazi h1, .tema-vaultcore .yazi h2 { font-family: "Fraunces", Georgia, serif; font-weight: 600; letter-spacing: -0.01em; }
+.tema-vaultcore .yazi h2 { color: #f0e6c8; }
+.tema-vaultcore pre, .tema-vaultcore code { font-family: "IBM Plex Mono", monospace; }
+.tema-vaultcore .dugme { color: #0e1424; }
+
+.vc-sahne { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 28px; align-items: center; margin-top: 18px; }
+@media (max-width: 600px) { .vc-sahne { grid-template-columns: 1fr; } .vc-kilit { max-width: 170px; } }
+.vc-kilit { width: 100%; }
+.vc-kilit .dis { fill: #151f38; stroke: #d6b25e; stroke-width: 3; }
+.vc-kilit .ic { fill: #1b2747; stroke: #8a7440; stroke-width: 1.5; }
+.vc-kilit line { stroke: #d6b25e; stroke-width: 2; stroke-linecap: round; }
+.vc-kilit .gobek { fill: #d6b25e; }
+.vc-kilit .isaret { fill: #f3dfa3; }
+.vc-kilit .kadran { transform-origin: 100px 100px; animation: vc-cevir 3.2s cubic-bezier(.6,0,.2,1) .3s both; }
+@keyframes vc-cevir { 0% { transform: rotate(0); } 35% { transform: rotate(140deg); } 65% { transform: rotate(-60deg); } 100% { transform: rotate(75deg); } }
+
+.vc-akis { display: grid; gap: 8px; font: 13px/1.4 "IBM Plex Mono", monospace; }
+.vc-akis div { display: grid; grid-template-columns: 7.5rem 1fr; gap: 10px; align-items: baseline; padding: 8px 12px; border: 1px solid #243052; border-radius: 8px; background: #0f1830cc; opacity: 0; animation: vc-gel .4s forwards; }
+.vc-akis div:nth-child(1) { animation-delay: .2s; } .vc-akis div:nth-child(2) { animation-delay: .6s; }
+.vc-akis div:nth-child(3) { animation-delay: 1s; } .vc-akis div:nth-child(4) { animation-delay: 1.4s; }
+.vc-akis div:nth-child(5) { animation-delay: 1.8s; border-color: #d6b25e88; }
+.vc-akis span { color: #d6b25e; }
+.vc-akis code { background: none; padding: 0; color: #cfd5e6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc-akis .sifreli { color: #f3dfa3; }
+@keyframes vc-gel { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.tema-vaultcore .kapak-etiket { color: #d6b25e; }

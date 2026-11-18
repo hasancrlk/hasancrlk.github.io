@@ -1,0 +1,29 @@
+{%- comment -%} Radar: noktalar yazıdaki örnek çıktıdaki açık portlar. {%- endcomment -%}
+<div class="ps-sahne" aria-hidden="true">
+  <div class="ps-radar">
+    <svg viewBox="0 0 300 300">
+      <defs>
+        <radialGradient id="ps-tarama" cx="0" cy="0" r="1">
+          <stop offset="0" stop-color="#39ff9e" stop-opacity=".45"/>
+          <stop offset="1" stop-color="#39ff9e" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <circle cx="150" cy="150" r="140" class="halka"/>
+      <circle cx="150" cy="150" r="100" class="halka"/>
+      <circle cx="150" cy="150" r="60" class="halka"/>
+      <line x1="10" y1="150" x2="290" y2="150" class="halka"/>
+      <line x1="150" y1="10" x2="150" y2="290" class="halka"/>
+      <g class="supurge"><path d="M150 150 L150 10 A140 140 0 0 1 271 80 Z" fill="url(#ps-tarama)"/></g>
+      <g class="nokta" style="--g:.6s"><circle cx="196" cy="74" r="5"/><text x="206" y="70">22/ssh</text></g>
+      <g class="nokta" style="--g:1.4s"><circle cx="228" cy="196" r="5"/><text x="238" y="200">80/http</text></g>
+      <g class="nokta kapali" style="--g:2.2s"><circle cx="92" cy="214" r="4"/><text x="40" y="236">443 · filtered</text></g>
+    </svg>
+  </div>
+  <pre class="ps-cikti">$ python -m cli scan 127.0.0.1 -p top100
+PORT   {% if include.L == "en" %}STATE    SERVICE{% else %}DURUM    SERVİS{% endif %}
+22     open     ssh     OpenSSH_9.6
+80     open     http    nginx
+443    filtered -
+<span class="imlec">█</span></pre>
+</div>
+<p class="kapak-etiket">asyncio · semaphore(200) · {% if include.L == "en" %}scope gate{% else %}kapsam kapısı{% endif %}</p>
