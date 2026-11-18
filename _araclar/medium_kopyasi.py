@@ -39,6 +39,13 @@ def kopya_uret(yol: str, hedef: pathlib.Path) -> None:
     with urllib.request.urlopen(SITE + yol) as r:
         sayfa = r.read().decode("utf-8")
     bas = re.search(r"<head>.*?</head>", sayfa, re.S).group(0)
+    # Medium canonical/og:url'yi izleyip o adresin önbellekteki hâlini getiriyor;
+    # kopya kendi adresini göstermeli.
+    kendi = f"{SITE}/medium/{hedef.name}/"
+    bas = re.sub(r'(<link rel="canonical" href=")[^"]*', rf"\g<1>{kendi}", bas)
+    bas = re.sub(r'(<meta property="og:url" content=")[^"]*', rf"\g<1>{kendi}", bas)
+    bas = re.sub(r'<script type="application/ld\+json">.*?</script>', "", bas, flags=re.S)
+    bas = re.sub(r'<link rel="alternate"[^>]*>', "", bas)
     makale = re.search(r"<article class=\"yazi\">.*?</article>", sayfa, re.S).group(0)
     makale = PRE.sub(pre_donustur, makale)
     if "<table" in makale:
