@@ -1,7 +1,7 @@
 ---
-title: "Yurtta yemeği kim alacak? Kararsız uygulamasının hikâyesi"
+title: "Yurtta siparişi kim alacak? Kararsız uygulamasının hikâyesi."
 kisa: Herkes parmağını ekrana koyar, uygulama geri sayımla birini rastgele seçer. KYK yurdundaki bir ihtiyaçtan doğdu.
-ozet: "KYK yurdunda dışarıdan yemek söylediğimizde birinin güvenliğe inip siparişi alması gerekiyordu. Kimin ineceğine bu uygulamayla karar veriyorduk."
+ozet: "KYK yurdunda dışarıdan yemek söylediğimizde birinin güvenliğe inip siparişi alması gerekiyordu. Kimin ineceğine bu tarz bir uygulamayla karar veriyorduk. Peki neden kendim de yapmayayım ki?"
 date: 2026-08-08
 teknolojiler: [React Native, Expo, expo-router, expo-haptics, TypeScript]
 repo: https://github.com/hasancrlk/Kararsiz
@@ -78,5 +78,3 @@ if (updated.size >= 2 && phaseRef.current === 'idle') {
 seçim anında bir başarı titreşimi ve kazanan parmak ekranda kaldığı sürece
 tekrarlayan güçlü bir titreşim veriliyor. Telefon masanın ortasında dururken
 sonucun hissedilmesi oyunun en önemli parçası.
-
-Uygulamayı gerçek telefonda ilk denediğimizde sonuç hoşuma gitti.
