@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Parolayı Saklamadan Dosya Şifrelemek: AES-256-GCM ve Argon2id | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Parolayı Saklamadan Dosya Şifrelemek: AES-256-GCM ve Argon2id" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="Hassas bir dosyayı e-postayla paylaştığınızda o dosya yıllarca bir sunucuda plaintext olarak durur. VaultCore’u bunun yerine üç gereksinimi birlikte karşılamak için geliştirdim: dosya diske yalnızca şifreli yazılmalı, parola hiçbir yerde saklanmamalı ve dosya belirli sayıda download’dan ya da belirli bir süreden sonra erişilemez olmalı." />
+<meta property="og:description" content="Hassas bir dosyayı e-postayla paylaştığınızda o dosya yıllarca bir sunucuda plaintext olarak durur. VaultCore’u bunun yerine üç gereksinimi birlikte karşılamak için geliştirdim: dosya diske yalnızca şifreli yazılmalı, parola hiçbir yerde saklanmamalı ve dosya belirli sayıda download’dan ya da belirli bir süreden sonra erişilemez olmalı." />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/sifreli-dosya-kasasi-5/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/sifreli-dosya-kasasi-5/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-17T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Parolayı Saklamadan Dosya Şifrelemek: AES-256-GCM ve Argon2id" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/vaultcore.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Parolayı Saklamadan Dosya Şifrelemek: AES-256-GCM ve Argon2id</h1>
+  <p class="lede">Bir dosyayı şifrelemek için doğru algoritmayı seçmek işin küçük kısmı. Asıl iş salt, nonce, KDF parametreleri ve hata mesajları gibi ayrıntıları doğru yönetmekte.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · FastAPI · cryptography · Argon2id · PostgreSQL · Docker<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/sifreli-dosya-kasasi">github.com/hasancrlk/sifreli-dosya-kasasi</a>
+  </p>
+
+  <p>Hassas bir dosyayı e-postayla paylaştığınızda o dosya yıllarca bir sunucuda
+plaintext olarak durur. VaultCore’u bunun yerine üç gereksinimi birlikte
+karşılamak için geliştirdim: dosya diske yalnızca şifreli yazılmalı, parola
+hiçbir yerde saklanmamalı ve dosya belirli sayıda download’dan ya da belirli bir
+süreden sonra erişilemez olmalı.</p>
+
+<p>Bu yazıda servisin kriptografik tasarımını, verdiğim kararların gerekçelerini ve
+servisin neyi vaat etmediğini anlatıyorum.</p>
+
+<pre>curl -X POST http://localhost:8000/api/v1/vault/upload \<br>&nbsp;&nbsp;-H "X-API-Key: $API_KEY" \<br>&nbsp;&nbsp;-F "file=@belge.pdf" -F "password=uzun-ve-guclu-parola" \<br>&nbsp;&nbsp;-F "max_downloads=1" -F "expires_in_hours=24"</pre>
+
+<h2 id="şifreleme-akışı">Şifreleme akışı</h2>
+
+<p>Parola önce Argon2id ile 256 bitlik bir key’e dönüştürülüyor, bu key ile dosya
+AES-256-GCM kullanılarak şifreleniyor. Her dosya için ayrı bir salt (16 byte) ve
+ayrı bir nonce (12 byte) üretiliyor. Veritabanına salt, nonce ve metadata
+yazılıyor; parola ve key yazılmıyor.</p>
+
+<pre>def encrypt(plaintext: bytes, password: str, aad: bytes | None = None):<br>&nbsp;&nbsp;&nbsp;&nbsp;params = _get_crypto_params()<br>&nbsp;&nbsp;&nbsp;&nbsp;salt = os.urandom(SALT_SIZE)<br>&nbsp;&nbsp;&nbsp;&nbsp;nonce = os.urandom(NONCE_SIZE)<br>&nbsp;&nbsp;&nbsp;&nbsp;key = derive_key(password, salt, params)<br>&nbsp;&nbsp;&nbsp;&nbsp;ciphertext = AESGCM(key).encrypt(nonce, plaintext, aad)<br>&nbsp;&nbsp;&nbsp;&nbsp;return EncryptionResult(ciphertext=ciphertext, salt=salt, nonce=nonce, params=params)</pre>
+
+<h2 id="neden-aes-gcm">Neden AES-GCM?</h2>
+
+<p>AES-GCM bir AEAD (Authenticated Encryption with Associated Data) modu; gizliliği
+ve bütünlüğü tek işlemde sağlıyor. AES-CBC seçseydim ayrıca bir MAC eklemem ve
+encrypt-then-MAC sırasını doğru uygulamam gerekirdi; implementasyon hatalarının
+çıktığı yer tam olarak burası. GCM padding kullanmadığı için padding oracle
+saldırılarından etkilenmiyor ve modern CPU’larda AES-NI ile donanım
+hızlandırması var.</p>
+
+<p>Dikkat edilmesi gereken tek nokta <strong>nonce reuse</strong>: aynı key ile aynı nonce’un iki
+kez kullanılması hem gizliliği hem bütünlüğü bozar. Bu yüzden her şifrelemede
+<code>os.urandom</code> ile yeni bir nonce üretiliyor.</p>
+
+<h2 id="neden-argon2id">Neden Argon2id?</h2>
+
+<p>Kullanıcı parolalarının entropisi düşüktür. Parola doğrudan key olarak
+kullanılırsa saldırgan saniyede çok sayıda tahmin deneyebilir. Argon2id
+memory-hard bir KDF: bu projede her türetme 64 MB bellek, 3 iterasyon ve 4 thread
+kullanıyor. GPU’larda bellek kısıtlı olduğu için paralel brute-force maliyeti
+ciddi şekilde artıyor.</p>
+
+<p>Argon2 parametreleri dosya başına saklanıyor. Parametreler ileride
+güçlendirilirse eski dosyalar kendi parametreleriyle açılmaya devam ediyor.</p>
+
+<h2 id="gözden-kaçabilecek-ayrıntılar">Gözden kaçabilecek ayrıntılar</h2>
+
+<ul>
+  <li><strong>Dosya ID’si ciphertext’e bağlı.</strong> ID, AES-GCM’nin AAD alanına giriyor.
+Veritabanında iki dosyanın ciphertext’i yer değiştirilirse authentication tag
+doğrulaması başarısız oluyor.</li>
+  <li><strong>Hata mesajları ayırt edilemiyor.</strong> Yanlış parola ile bozulmuş veri aynı
+response’u dönüyor; oracle saldırılarına açık kapı bırakılmıyor.</li>
+  <li><strong>İki katmanlı rate limiting.</strong> IP başına dakikada 5 download denemesi; aynı
+dosyaya 5 yanlış parola girilirse dosya 15 dakika kilitleniyor. İkinci katman
+farklı IP’lerden gelen dağıtık denemelere karşı da çalışıyor.</li>
+  <li><strong>Atomik download sayacı.</strong> One-time bir link’e aynı anda iki istek gelirse
+yalnızca biri başarılı oluyor; race condition yok.</li>
+  <li><strong>DoS’a karşı sınırlar.</strong> Upload chunk’lar hâlinde okunuyor ve eşzamanlı KDF
+sayısı sınırlı; 64 MB’lık türetmeler sunucuyu tüketmiyor.</li>
+  <li><strong>Cleanup.</strong> Süresi dolan ya da download hakkı biten dosyaların ciphertext’i
+diskten de siliniyor.</li>
+</ul>
+
+<h2 id="servisin-vaat-etmedikleri">Servisin vaat etmedikleri</h2>
+
+<p>Bir süre reponun GitHub açıklamasında “zero-knowledge” yazıyordu. Doğru değildi,
+düzelttim. Şifreleme server-side yapılıyor; yani sunucu, istek süresince parolayı
+ve dosyanın plaintext hâlini görüyor. Gerçek end-to-end gizlilik için şifrelemenin
+client-side yapılması gerekir.</p>
+
+<p>Diğer sınırlar: servis tek bir API key ile korunuyor, kullanıcı bazlı
+authorization yok; TLS bir reverse proxy (nginx, Caddy) ile sağlanmalı; Python’da
+key’i bellekten güvenilir biçimde silmek mümkün değil; silinen dosyalar için
+secure wipe yapılmıyor.</p>
+
+<h2 id="kapanış">Kapanış</h2>
+
+<p>Kriptografi kullanan bir serviste algoritma seçimi genellikle tartışılan kısım
+oluyor, ama hatalar çoğunlukla çevresindeki ayrıntılarda çıkıyor: nonce yönetimi,
+KDF parametreleri, hata mesajları, rate limiting. Bir güvenlik servisinin neyi
+korumadığını açıkça yazmak da en az neyi koruduğunu yazmak kadar önemli;
+abartılmış bir iddia, eksik bir özellikten daha fazla zarar verir.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/sifreli-dosya-kasasi/">https://hasancrlk.github.io/projeler/sifreli-dosya-kasasi/</a></p>
+</main>
+</body>
+</html>

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>File Integrity Monitoring: Baseline’ın Kendisi Değiştirilirse Ne Olur? | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="File Integrity Monitoring: Baseline’ın Kendisi Değiştirilirse Ne Olur?" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="Bir sunucuya sızan saldırgan çoğu zaman dosya sisteminde iz bırakır: bir sayfaya zararlı kod ekler, shell.php gibi bir web shell yükler ya da bir config dosyasını değiştirir. File Integrity Monitoring (FIM) bu değişiklikleri yakalamak için kullanılan klasik yöntem." />
+<meta property="og:description" content="Bir sunucuya sızan saldırgan çoğu zaman dosya sisteminde iz bırakır: bir sayfaya zararlı kod ekler, shell.php gibi bir web shell yükler ya da bir config dosyasını değiştirir. File Integrity Monitoring (FIM) bu değişiklikleri yakalamak için kullanılan klasik yöntem." />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/dosya-butunlugu-izleme-5/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/dosya-butunlugu-izleme-5/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-17T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="File Integrity Monitoring: Baseline’ın Kendisi Değiştirilirse Ne Olur?" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/fim-sentinel.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>File Integrity Monitoring: Baseline'ın Kendisi Değiştirilirse Ne Olur?</h1>
+  <p class="lede">Bir FIM aracı dosyalardaki değişikliği yakalayabilir; ama saldırgan aracın kendi kayıtlarını da değiştirirse bunu fark edebilir mi? Chain of custody tam olarak bu soruyla ilgili.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · FastAPI · SQLAlchemy · Alembic · Typer · PostgreSQL · Docker<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/dosya-butunlugu-izleme">github.com/hasancrlk/dosya-butunlugu-izleme</a>
+  </p>
+
+  <p>Bir sunucuya sızan saldırgan çoğu zaman dosya sisteminde iz bırakır: bir sayfaya
+zararlı kod ekler, <code>shell.php</code> gibi bir web shell yükler ya da bir config
+dosyasını değiştirir. File Integrity Monitoring (FIM) bu değişiklikleri yakalamak
+için kullanılan klasik yöntem.</p>
+
+<p>Staja başlamadan önce FIM kavramını bilmiyordum; EMT Cyber’de ödev olarak
+önüme geldiğinde ilk iş ne olduğunu ve neden bu kadar yaygın kullanıldığını
+anlamak oldu. Bu yazıda geliştirdiğim FIM-Sentinel’i ve özellikle aracın kendi
+kayıtlarını nasıl koruduğunu anlatıyorum.</p>
+
+<h2 id="fim-nasıl-çalışır">FIM nasıl çalışır?</h2>
+
+<p>İki adımdan oluşur:</p>
+
+<ol>
+  <li>Klasörün güvenilir hâlinin bir <strong>baseline</strong>‘ı alınır: her dosyanın hash’i,
+boyutu, izinleri ve sahibi.</li>
+  <li>Klasör belirli aralıklarla yeniden taranır ve baseline ile karşılaştırılır.</li>
+</ol>
+
+<pre>$ python -m cli.fim_cli baseline --path /var/www/html<br>$ python -m cli.fim_cli scan --baseline-id 1<br>&nbsp;<br>│ MODIFIED │ /var/www/html/index.html │ Hash mismatch detected. │<br>│ MODIFIED │ /var/www/html/config.php │ Hash mismatch detected. │<br>│ ADDED&nbsp;&nbsp;&nbsp;&nbsp;│ /var/www/html/shell.php&nbsp;&nbsp;│ New file detected.&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│</pre>
+
+<p>Dosyalar 64 KB’lık chunk’lar hâlinde okunup SHA-256 ile hash’leniyor; büyük
+dosyalar belleği zorlamıyor.</p>
+
+<h2 id="asıl-problem-baselineın-bütünlüğü">Asıl problem: baseline’ın bütünlüğü</h2>
+
+<p>Karşılaştırma ne kadar doğru olursa olsun baseline bir veritabanında duruyor.
+Veritabanına erişen bir saldırgan, yüklediği <code>shell.php</code>‘yi baseline’a da ekler
+ve tarama “değişiklik yok” der.</p>
+
+<p>Adli bilişimde bu soru <strong>chain of custody</strong> (delil zinciri) kavramıyla karşılanır:
+delilin toplandığı andan itibaren değiştirilmediğini kanıtlayabilmek. FIM-Sentinel
+bunun için şu önlemleri alıyor:</p>
+
+<p><strong>Baseline imzalanıyor.</strong> Her baseline <code>FIM_HMAC_KEY</code> ile HMAC-SHA256 olarak
+imzalanıyor. İmza, dosya sırasından bağımsız olsun diye sıralanmış satırlar
+üzerinden hesaplanıyor:</p>
+
+<pre>def sign_baseline(target_path, follow_symlinks, entries) -&gt; str:<br>&nbsp;&nbsp;&nbsp;&nbsp;mac = hmac.new(get_hmac_key(), digestmod=hashlib.sha256)<br>&nbsp;&nbsp;&nbsp;&nbsp;mac.update(json.dumps([target_path, bool(follow_symlinks)]).encode() + b"\n")<br>&nbsp;&nbsp;&nbsp;&nbsp;rows = sorted(<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[_get(e, k) for k in ("file_path", "sha256", "size_bytes", "mode", "uid", "gid")]<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for e in entries<br>&nbsp;&nbsp;&nbsp;&nbsp;)<br>&nbsp;&nbsp;&nbsp;&nbsp;for row in rows:<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;mac.update(json.dumps(row, separators=(",", ":")).encode() + b"\n")<br>&nbsp;&nbsp;&nbsp;&nbsp;return mac.hexdigest()</pre>
+
+<p>İmzası tutmayan bir baseline ile tarama istenirse API HTTP 409 dönüyor ve bu
+girişim audit log’a yazılıyor.</p>
+
+<p><strong>Audit log zincirleniyor.</strong> Her işlem bir audit log’a yazılıyor ve her satır bir
+öncekinin hash’ine bağlı (tamper-evident log). Bir satırı silmek, değiştirmek ya
+da sırasını bozmak zinciri kırıyor; <code>verify-audit</code> komutu kırılan satırı
+gösteriyor. PostgreSQL tarafında bir trigger bu tablodaki UPDATE ve DELETE
+işlemlerini ayrıca engelliyor.</p>
+
+<p><strong>Symlink’ler takip edilmiyor.</strong> Link’in hedefi kaydediliyor. Böylece bir
+symlink’in başka bir dosyaya yönlendirilmesi değişiklik olarak yakalanıyor ve
+izlenen klasörün dışındaki dosyalar okunmuyor.</p>
+
+<p><strong>Okunamayan dosya “silindi” sayılmıyor.</strong> Permission nedeniyle okunamayan bir
+dosya <code>DELETED</code> olarak değil, error olarak raporlanıyor. Bir incelemede bu ayrım
+yanlış bir sonuca varılmasını önlüyor.</p>
+
+<p>Bunun belgelenmiş bir sınırı var: <code>FIM_HMAC_KEY</code> izlenen sunucunun
+veritabanından ayrı bir yerde (örneğin bir secret manager’da) tutulmalı. Hem
+veritabanına hem key’e erişen biri baseline’ı yeniden imzalayabilir.</p>
+
+<h2 id="otomasyon-ve-api">Otomasyon ve API</h2>
+
+<p><code>scan</code> komutu değişiklik bulduğunda exit code 2 ile bitiyor; bu sayede araç
+doğrudan cron’a ya da bir CI job’ına bağlanabiliyor:</p>
+
+<pre>0 * * * * fim-sentinel scan -b 1 || echo "FIM alert" | mail -s FIM admin@example.com</pre>
+
+<p>Aynı işlemler REST API üzerinden de yapılabiliyor. API <code>X-API-Key</code> istiyor ve
+yalnızca <code>FIM_ALLOWED_PATHS</code> ile izin verilen dizinleri tarayabiliyor. CLI ve API
+aynı service katmanını kullandığı için hiçbir kural iki kez yazılmadı.</p>
+
+<h2 id="kapanış">Kapanış</h2>
+
+<p>Değişikliği tespit eden bir araç yazmak görece kolay. Asıl zor olan, aracın kendi
+kayıtlarının değiştirilmediğini kanıtlayabilmesi. Bir güvenlik aracını tasarlarken
+“saldırgan bu aracın kendisine ne yapar?” sorusunu sormak; imzalı baseline,
+zincirli audit log ve veritabanı trigger’ı gibi önlemleri doğal olarak gündeme
+getiriyor.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/dosya-butunlugu-izleme/">https://hasancrlk.github.io/projeler/dosya-butunlugu-izleme/</a></p>
+</main>
+</body>
+</html>

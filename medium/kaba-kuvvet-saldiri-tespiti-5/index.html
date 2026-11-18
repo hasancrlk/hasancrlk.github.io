@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Brute-Force Tespiti: Şifresini Unutan Kullanıcıyı Bottan Ayırmak | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Brute-Force Tespiti: Şifresini Unutan Kullanıcıyı Bottan Ayırmak" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="İnternete açık bir SSH sunucusunun auth.log dosyasına bakarsanız şöyle satırlar görürsünüz:" />
+<meta property="og:description" content="İnternete açık bir SSH sunucusunun auth.log dosyasına bakarsanız şöyle satırlar görürsünüz:" />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/kaba-kuvvet-saldiri-tespiti-5/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/kaba-kuvvet-saldiri-tespiti-5/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-18T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Brute-Force Tespiti: Şifresini Unutan Kullanıcıyı Bottan Ayırmak" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/authwatch.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Brute-Force Tespiti: Şifresini Unutan Kullanıcıyı Bottan Ayırmak</h1>
+  <p class="lede">Her başarısız login'e alarm üreten bir sistem, kısa süre içinde kimsenin bakmadığı bir sisteme dönüşür. Brute-force tespitinde asıl iş saldırıyı bulmak değil, false positive'leri ayıklamaktır.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · FastAPI · SQLAlchemy · PostgreSQL · pytest · Docker<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/kaba-kuvvet-saldiri-tespiti">github.com/hasancrlk/kaba-kuvvet-saldiri-tespiti</a>
+  </p>
+
+  <p>İnternete açık bir SSH sunucusunun <code>auth.log</code> dosyasına bakarsanız şöyle
+satırlar görürsünüz:</p>
+
+<pre>Sep 17 03:12:01 srv01 sshd[4101]: Failed password for invalid user admin from 203.0.113.5<br>Sep 17 03:12:04 srv01 sshd[4102]: Failed password for invalid user oracle from 203.0.113.5<br>Sep 17 03:12:07 srv01 sshd[4103]: Failed password for root from 203.0.113.5<br>Sep 17 03:12:10 srv01 sshd[4104]: Failed password for invalid user postgres from 203.0.113.5</pre>
+
+<p>Aynı IP, üç saniye arayla, her seferinde farklı bir username. Bu açıkça bir bot.
+Aynı log dosyasında şunlar da var:</p>
+
+<pre>Sep 17 09:42:10 srv01 sshd[5210]: Failed password for deniz from 198.51.100.7<br>Sep 17 09:42:16 srv01 sshd[5211]: Failed password for deniz from 198.51.100.7<br>Sep 17 09:42:41 srv01 sshd[5212]: Failed password for deniz from 198.51.100.7</pre>
+
+<p>Bu ise büyük ihtimalle şifresini hatırlamaya çalışan bir çalışan. İkisi de aynı
+kuralı tetikler, ama biri saldırı diğeri değil. Bu yazıda EMT Cyber stajında
+ödev olarak geliştirdiğim AuthWatch’ı ve bu ayrımı nasıl yaptığını anlatıyorum.</p>
+
+<p><em>Örnekler depodaki sample log dosyasından alındı; IP adresleri dokümantasyon
+için ayrılmış aralıklardan.</em></p>
+
+<h2 id="fixed-window-değil-sliding-window">Fixed window değil, sliding window</h2>
+
+<p>Temel kural basit: aynı IP’den 60 saniye içinde 5 başarısız deneme varsa alarm.
+Ancak sayaç her dakika sıfırlanırsa (fixed window), saldırgan bir pencerenin
+sonunda 4, sonrakinin başında 4 deneme yaparak threshold’un altında kalabilir.</p>
+
+<p>Bu yüzden <strong>sliding window</strong> kullandım. Her IP için bir <code>deque</code> tutuluyor ve
+yeni bir deneme geldiğinde pencerenin dışına düşen kayıtlar atılıyor:</p>
+
+<pre>bucket.append(event)<br>while bucket and event.timestamp - bucket[0].timestamp &gt; window:<br>&nbsp;&nbsp;&nbsp;&nbsp;bucket.popleft()<br>if len(bucket) &gt;= threshold:<br>&nbsp;&nbsp;&nbsp;&nbsp;alarm_uret()</pre>
+
+<p>Her event kuyruğa bir kez girip bir kez çıktığı için maliyet O(n); büyük bir log
+tek geçişte işleniyor. Fixed window’un kaçırdığı 4+4 dizisi depoda ayrı bir test
+olarak duruyor.</p>
+
+<p>Ayrıca bir <strong>cooldown</strong> süresi var. Threshold aşıldıktan sonra her yeni deneme
+için alarm üretilseydi, 500 denemelik bir saldırı 496 alarm demekti. Aynı IP için
+varsayılan olarak 300 saniye boyunca yeni alarm üretilmiyor.</p>
+
+<h2 id="confidence-score-kullanıcı-mı-bot-mu">Confidence score: kullanıcı mı, bot mu?</h2>
+
+<p>Threshold’u geçen her burst’ü saldırı saymak yerine her alarma bir confidence
+score veriyorum. Skor denemelerin biçimine bakıyor:</p>
+
+<ul>
+  <li><strong>Username çeşitliliği.</strong> Üç ve üzeri farklı username denenmişse skor artıyor;
+tek bir username ise düşüyor.</li>
+  <li><strong>Var olmayan kullanıcılar.</strong> <code>invalid user</code> satırları user enumeration
+işareti.</li>
+  <li><strong>Zamanlama düzenliliği.</strong> Denemeler arası sürelerin varyasyon katsayısına
+bakılıyor. İnsan düzensiz aralıklarla dener, otomasyon sabit aralıklarla.</li>
+  <li><strong>Yoğunluk.</strong> Threshold’un üç katı ve üzeri deneme skoru artırıyor.</li>
+  <li><strong>Geçmiş.</strong> Aynı IP’den daha önce başarılı login varsa skor düşüyor.</li>
+</ul>
+
+<p>Sonuç <code>high</code>, <code>medium</code> veya <code>low</code> olarak etiketleniyor ve her alarm bu kararın
+gerekçesini taşıyor:</p>
+
+<pre>203.0.113.5&nbsp;&nbsp;&nbsp;confidence: high (0.95)<br>&nbsp;&nbsp;- 5 farkli kullanici adi denendi (kullanici tarama).<br>&nbsp;&nbsp;- 4 deneme var olmayan kullanici adina yapildi.<br>&nbsp;&nbsp;- Denemeler neredeyse sabit araliklarla geldi (otomasyon izi).<br>&nbsp;<br>198.51.100.7&nbsp;&nbsp;confidence: low (0.0)<br>&nbsp;&nbsp;- Tek kullanici adi - parolasini unutmus bir kullanici olabilir.<br>&nbsp;&nbsp;- Bu IP daha once basariyla giris yapmis (bilinen kaynak).</pre>
+
+<p>Low confidence alarmlar silinmiyor, yalnızca etiketleniyor. Kendi kendini
+filtreleyen bir sistem gerçek bir saldırıyı da sessizce yutabilir; karar
+analistte kalmalı.</p>
+
+<p>Bir ayrıntı: web access log’larında username alanı çoğunlukla <code>-</code> gelir. Bu
+durumda “tek username” indirimi uygulanmıyor; sinyal yoksa indirim de yok.</p>
+
+<h2 id="account-takeover-tespiti">Account takeover tespiti</h2>
+
+<p>Bir IP aynı username’e art arda başarısız denemeler yapıp ardından o hesapla
+başarılı login olursa ayrı bir alarm üretiliyor: <code>possible_account_takeover</code>.
+Username eşleşmesi zorunlu. <code>admin</code> hesabına yapılan saldırıdan sonra <code>deploy</code>
+ile yapılan normal bir login bu kapsama girmiyor.</p>
+
+<h2 id="desteklenen-log-formatları">Desteklenen log formatları</h2>
+
+<p>SSH <code>auth.log</code>, nginx/apache combined log ve JSON satırları. Parse edilemeyen
+satırlar atılmıyor; sayılıyor ve örnekleri saklanıyor. <code>auth.log</code> timestamp’inde
+yıl bilgisi olmadığı için yıl, upload sırasında parametre olarak veriliyor.</p>
+
+<h2 id="kapanış">Kapanış</h2>
+
+<p>AuthWatch’ın bilinen sınırları var. Tespit IP bazlı olduğu için her IP’den az
+sayıda deneme yapan dağıtık bir botnet threshold’a takılmıyor; bunun için
+kullanıcı ya da ASN bazlı bir boyut gerekir. Her upload ayrı işlendiği için iki
+dosyaya bölünmüş bir saldırı ikiye ayrılabiliyor. <code>X-Forwarded-For</code> okunmuyor ve
+servisin kendisinde authentication yok.</p>
+
+<p>Brute-force tespitinde asıl değer yakalanan saldırı sayısında değil, analistin
+güvenebildiği alarm sayısındadır. Gerekçesini söyleyen bir alarm, sadece “ALARM”
+diyen bir satırdan çok daha kullanışlıdır.</p>
+
+<p>Proje 48 testle geliyor; sample log depoda olduğu için <code>docker compose up</code>
+sonrası hemen denenebilir.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/kaba-kuvvet-saldiri-tespiti/">https://hasancrlk.github.io/projeler/kaba-kuvvet-saldiri-tespiti/</a></p>
+</main>
+</body>
+</html>

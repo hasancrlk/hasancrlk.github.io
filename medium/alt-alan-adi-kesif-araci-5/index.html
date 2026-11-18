@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Subdomain Enumeration’da Rate Limit ve Wildcard DNS Sorunu | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Subdomain Enumeration’da Rate Limit ve Wildcard DNS Sorunu" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="Bir kurumun ana domain’i altında zamanla admin., vpn., test., api. gibi onlarca subdomain birikir. Bir kısmı unutulur ve güncellenmeyen sunucular erişilebilir kalır. Attack surface’i çıkarmak bu isimleri bulmakla başlar; bug bounty programlarında ve CTF’lerde de recon aşamasının ilk adımı genellikle budur." />
+<meta property="og:description" content="Bir kurumun ana domain’i altında zamanla admin., vpn., test., api. gibi onlarca subdomain birikir. Bir kısmı unutulur ve güncellenmeyen sunucular erişilebilir kalır. Attack surface’i çıkarmak bu isimleri bulmakla başlar; bug bounty programlarında ve CTF’lerde de recon aşamasının ilk adımı genellikle budur." />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/alt-alan-adi-kesif-araci-5/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/alt-alan-adi-kesif-araci-5/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-18T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Subdomain Enumeration’da Rate Limit ve Wildcard DNS Sorunu" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/subhound.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Subdomain Enumeration'da Rate Limit ve Wildcard DNS Sorunu</h1>
+  <p class="lede">Bir recon aracının en tehlikeli hatası çökmek değil, hata vermeden eksik sonuç döndürmektir. Subdomain enumeration'da bunun iki kaynağı var: DNS resolver'ların sessiz rate limiting'i ve wildcard DNS.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · asyncio · dnspython · FastAPI · SQLAlchemy · Docker<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/alt-alan-adi-kesif-araci">github.com/hasancrlk/alt-alan-adi-kesif-araci</a>
+  </p>
+
+  <p>Bir kurumun ana domain’i altında zamanla <code>admin.</code>, <code>vpn.</code>, <code>test.</code>, <code>api.</code> gibi
+onlarca subdomain birikir. Bir kısmı unutulur ve güncellenmeyen sunucular
+erişilebilir kalır. Attack surface’i çıkarmak bu isimleri bulmakla başlar; bug
+bounty programlarında ve CTF’lerde de recon aşamasının ilk adımı genellikle budur.</p>
+
+<p>Wildcard DNS ile ilk olarak Bilgisayar Ağları dersinde tanışmıştım. Bu yazıda
+EMT Cyber stajında ödev olarak geliştirdiğim SubHound’u ve bir recon aracını
+sessizce yanıltabilecek iki sorunu nasıl ele aldığını anlatıyorum.</p>
+
+<pre>$ python -m cli enumerate example.com<br>Denenen&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: 315<br>Bulunan&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: 4 aktif (12 wildcard elendi)<br>&nbsp;&nbsp;&nbsp;api.example.com&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;A&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;93.184.216.35<br>*&nbsp;&nbsp;admin.example.com&nbsp;&nbsp;&nbsp;&nbsp;A&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;93.184.216.36<br>&nbsp;&nbsp;&nbsp;mail.example.com&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CNAME&nbsp;&nbsp;&nbsp;ghs.googlehosted.com<br>&nbsp;&nbsp;&nbsp;www.example.com&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;A&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;93.184.216.34</pre>
+
+<p>SubHound wordlist tabanlı çalışıyor: gömülü listedeki 300’den fazla etiketi
+<code>&lt;etiket&gt;.domain.com</code> hâline getirip A, AAAA ve CNAME kayıtlarını sorguluyor.</p>
+
+<h2 id="concurrency-ile-rate-limit-aynı-şey-değil">Concurrency ile rate limit aynı şey değil</h2>
+
+<p>Binlerce DNS sorgusunu hızlı yürütmek için <code>asyncio</code> kullandım. Burada birbirinden
+bağımsız iki ayar var:</p>
+
+<ul>
+  <li><strong>Concurrency.</strong> Aynı anda kaç sorgunun beklemede olacağı. <code>asyncio.Semaphore</code>
+ile sınırlanıyor, varsayılan 50.</li>
+  <li><strong>Rate limit.</strong> Saniyede kaç sorgu gönderileceği. Token bucket ile
+sınırlanıyor, varsayılan saniyede 100.</li>
+</ul>
+
+<p>Sadece concurrency’yi sınırlamak yetmiyor. 50 sorgunun her biri birkaç milisaniye
+sürerse saniyede binlerce sorgu gider. Çoğu public DNS resolver bu hızda
+client’ı kısıtlıyor ve bunu hata vererek değil, <code>SERVFAIL</code> ya da <code>REFUSED</code>
+döndürerek yapıyor. Kodda bu cevaplar “kayıt yok” ile aynı görünüyor. Tarama
+hatasız tamamlanıyor, ama liste eksik çıkıyor.</p>
+
+<p>Token bucket’ı sabit aralıklı <code>sleep</code>‘e tercih ettim: kısa burst’lere izin
+verirken uzun vadeli ortalamayı koruyor. Bekleme lock’un dışında yapılıyor;
+yavaş bir task bütün kuyruğu durdurmuyor.</p>
+
+<pre>self._tokens = min(capacity, self._tokens + gecen_sure * rate)</pre>
+
+<h2 id="wildcard-dns-ve-false-positiveler">Wildcard DNS ve false positive’ler</h2>
+
+<p>Bir domain <code>*.example.com</code> için kayıt tanımlamışsa, var olmayan her isim de cevap
+döner. Bunu fark etmeyen bir araç wordlist’teki her kelime için “bulundu” der.</p>
+
+<p>SubHound taramaya başlamadan önce rastgele üretilmiş üç isim sorguluyor
+(<code>subhound-&lt;16 hex&gt;.example.com</code>). Üçü de cevap veriyorsa domain’de wildcard
+olduğu kabul ediliyor ve dönen IP kümesi kaydediliyor. Tarama sırasında IP kümesi
+bu kümeyle <strong>birebir</strong> aynı olan sonuçlar wildcard olarak işaretleniyor.</p>
+
+<p>Kısmi değil birebir eşleşme kullanmamın sebebi şu: gerçek bir subdomain de
+wildcard ile aynı sunucuda, örneğin aynı reverse proxy’nin arkasında duruyor
+olabilir. Elenen sonuçlar silinmiyor, <code>is_wildcard</code> olarak işaretleniyor ve
+<code>--show-wildcard</code> ile görüntülenebiliyor.</p>
+
+<h2 id="diff-raporu">Diff raporu</h2>
+
+<p>Aynı domain tekrar tarandığında, önceki taramada olmayan subdomain’ler <code>*</code> ile
+işaretleniyor. Araç düzenli çalıştırıldığında yeni açılan bir sunucu ilk gün fark
+edilebiliyor.</p>
+
+<h2 id="kapanış">Kapanış</h2>
+
+<p>SubHound’un bilinçli sınırları var. Gerçek bir recon’da Certificate Transparency
+log’ları ve passive DNS kaynakları wordlist’ten daha verimli; bunlar eklenmedi.
+Zone transfer (<code>AXFR</code>) denemesi izin sınırına yakın olduğu için bilerek dışarıda
+bırakıldı. Subdomain takeover kontrolü ve IDN/punycode desteği de yok.</p>
+
+<p>Bu projede rate limit’in bir “nezaket” özelliği değil, doğrudan bir doğruluk
+özelliği olduğu ortaya çıktı: sessizce kısıtlanan bir tarama, eksik ama güven
+veren bir sonuç üretir. Proje 42 testle geliyor; CLI ve REST API aynı engine’i
+kullanıyor.</p>
+
+<p><em>Recon yalnızca sahibi olduğunuz ya da test izni verilmiş domain’lerde
+yapılmalıdır.</em></p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/alt-alan-adi-kesif-araci/">https://hasancrlk.github.io/projeler/alt-alan-adi-kesif-araci/</a></p>
+</main>
+</body>
+</html>

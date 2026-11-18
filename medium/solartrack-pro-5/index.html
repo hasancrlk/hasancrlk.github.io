@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Arduino ile Çift Eksenli Güneş Takip Sistemi: LDR, Servo ve Jitter Problemi | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Arduino ile Çift Eksenli Güneş Takip Sistemi: LDR, Servo ve Jitter Problemi" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="SolarTrack Pro, Bilgisayar Organizasyonu dersi için geliştirdiğim çift eksenli (pan-tilt) bir güneş takip prototipi. Bu yazıda sistemin çalışma prensibini, prototipte en çok uğraştıran servo jitter problemini ve çalışma modlarını anlatıyorum." />
+<meta property="og:description" content="SolarTrack Pro, Bilgisayar Organizasyonu dersi için geliştirdiğim çift eksenli (pan-tilt) bir güneş takip prototipi. Bu yazıda sistemin çalışma prensibini, prototipte en çok uğraştıran servo jitter problemini ve çalışma modlarını anlatıyorum." />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/solartrack-pro-5/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/solartrack-pro-5/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-08-07T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Arduino ile Çift Eksenli Güneş Takip Sistemi: LDR, Servo ve Jitter Problemi" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/solartrack.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Arduino ile Çift Eksenli Güneş Takip Sistemi: LDR, Servo ve Jitter Problemi</h1>
+  <p class="lede">Sabit bir güneş paneli güneşe günün yalnızca bir bölümünde dik bakar. Paneli güneşle birlikte döndürmek aynı panelden daha fazla enerji almanın en doğrudan yolu; prototipte asıl zorluk ise kod değil, servo jitter'ı oldu.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Arduino · C++ · LDR · SG90 servo · Serial<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/SolarTrack-Pro">github.com/hasancrlk/SolarTrack-Pro</a>
+  </p>
+
+  <p>SolarTrack Pro, Bilgisayar Organizasyonu dersi için geliştirdiğim çift eksenli
+(pan-tilt) bir güneş takip prototipi. Bu yazıda sistemin çalışma prensibini,
+prototipte en çok uğraştıran servo jitter problemini ve çalışma modlarını
+anlatıyorum.</p>
+
+<h2 id="donanım">Donanım</h2>
+
+<ul>
+  <li>Arduino Uno R3</li>
+  <li>4 adet LDR (sol, sağ, yukarı, aşağı)</li>
+  <li>LDR’ler için 10K dirençlerle voltage divider</li>
+  <li>2 adet SG90 micro servo ve pan-tilt mekanizması</li>
+  <li>4.2V 100mA güneş paneli, breadboard ve jumper kablolar</li>
+</ul>
+
+<h2 id="çalışma-prensibi">Çalışma prensibi</h2>
+
+<p>Dört LDR panelin dört kenarına yerleştirildi. Güneş tam karşıdayken karşılıklı
+sensörler aynı ışık değerini okur. Güneş yer değiştirdikçe bir taraf daha fazla
+ışık alır ve panel o yöne döndürülür. Yatay eksende sol ve sağ sensörlerin farkına
+bakılıyor:</p>
+
+<pre>int yatayFark = sol - sag;<br>if (yatayFark &gt; ESIK &amp;&amp; yatayAci &lt; YATAY_MAX) {<br>&nbsp;&nbsp;yatayAci += ADIM;<br>} else if (yatayFark &lt; -ESIK &amp;&amp; yatayAci &gt; YATAY_MIN) {<br>&nbsp;&nbsp;yatayAci -= ADIM;<br>}</pre>
+
+<p>Dikey eksende aynı mantık yukarı ve aşağı sensörlerle uygulanıyor.</p>
+
+<h2 id="servo-jitter-problemi">Servo jitter problemi</h2>
+
+<p>LDR okumaları hiçbir zaman tam sabit değil; sürekli küçük dalgalanmalar (noise)
+gösteriyor. Kod sensörler arasındaki her farka tepki verirse servo, panel doğru
+konumdayken bile ileri geri titriyor. Prototipte en çok zaman alan konu bu oldu.</p>
+
+<p>Kodda bu soruna karşı iki sabit var:</p>
+
+<ul>
+  <li><strong>Threshold (<code>ESIK = 30</code>).</strong> Karşılıklı sensörler arasındaki fark bu değeri
+aşmadıkça servo hareket etmiyor; ölçüm noise’u harekete dönüşmüyor.</li>
+  <li><strong>Step (<code>ADIM = 1</code> derece).</strong> Panel her loop’ta yalnızca bir derece dönüyor.
+Büyük adımlar hedefin etrafında oscillation’a yol açabilir.</li>
+</ul>
+
+<p>Servo açıları ayrıca 0–180 derece arasında sınırlandırıldı; mekanizma
+zorlanmıyor.</p>
+
+<h2 id="çalışma-modları-ve-serial-komutlar">Çalışma modları ve serial komutlar</h2>
+
+<p>Bulutlu havada ışık dağınık geliyor ve sensörler net bir yön göstermiyor; gece
+ise takip edilecek bir kaynak yok. Bu durumlarda panelin rastgele dönmesi yerine
+merkezde kilitlenmesi tercih edildi. Modlar serial port üzerinden komutla
+değiştiriliyor:</p>
+
+<ul>
+  <li><strong><code>MODE_SUN</code>.</strong> Aktif takip.</li>
+  <li><strong><code>MODE_CLOUD</code> / <code>MODE_NIGHT</code>.</strong> Servolar 90°/90° konumunda kilitli.</li>
+  <li><strong><code>CENTER</code>.</strong> Servoları merkeze alır.</li>
+  <li><strong><code>STOP</code> / <code>START</code>.</strong> Hareketi durdurur ya da yeniden başlatır.</li>
+  <li><strong><code>DELAY_&lt;ms&gt;</code>.</strong> Sensör okuma aralığını 10–500 ms arasında ayarlar.</li>
+</ul>
+
+<p>Kart her loop’ta sensör değerlerini ve servo açılarını serial porta yazıyor;
+bu çıktı bir dashboard üzerinden okunup grafiğe dökülebiliyor.</p>
+
+<h2 id="kapanış">Kapanış</h2>
+
+<p>Prototipin geliştirilebilecek iki yönü var: toplam ışık seviyesine bakarak bulut
+ve gece modunun otomatik seçilmesi, ve panelin ürettiği voltajın ölçülüp sabit bir
+panelle karşılaştırılması. İkincisi, sistemin sağladığı verim artışını sayısal
+olarak göstermenin tek yolu.</p>
+
+<p>Yazılımda bir koşul ya doğrudur ya yanlış; sensörlerle çalışırken ise her okuma
+biraz noise içerir. Threshold ve step gibi iki küçük sabit, titreyen bir
+prototiple düzgün çalışan bir sistem arasındaki farkı oluşturuyor.</p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/solartrack-pro/">https://hasancrlk.github.io/projeler/solartrack-pro/</a></p>
+</main>
+</body>
+</html>

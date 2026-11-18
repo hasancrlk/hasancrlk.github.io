@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Kendi Port Scanner’ımı Yazmak: asyncio, Banner Grabbing ve Scope Kontrolü | Hasan Carlak</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Kendi Port Scanner’ımı Yazmak: asyncio, Banner Grabbing ve Scope Kontrolü" />
+<meta name="author" content="Hasan Carlak" />
+<meta property="og:locale" content="tr" />
+<meta name="description" content="PortScout’u nmap’in yerini alması için değil, onun en sık kullanılan kısmını anlamak için yazdım: TCP connect scan ve servislerin bağlantı kurulduğunda gönderdiği ilk satırın, yani banner’ın okunması. Bu da EMT Cyber stajında verilen ödevlerden biriydi." />
+<meta property="og:description" content="PortScout’u nmap’in yerini alması için değil, onun en sık kullanılan kısmını anlamak için yazdım: TCP connect scan ve servislerin bağlantı kurulduğunda gönderdiği ilk satırın, yani banner’ın okunması. Bu da EMT Cyber stajında verilen ödevlerden biriydi." />
+<link rel="canonical" href="https://hasancrlk.github.io/medium/port-tarayici-5/" />
+<meta property="og:url" content="https://hasancrlk.github.io/medium/port-tarayici-5/" />
+<meta property="og:site_name" content="Hasan Carlak" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-09-18T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Kendi Port Scanner’ımı Yazmak: asyncio, Banner Grabbing ve Scope Kontrolü" />
+
+<!-- End Jekyll SEO tag -->
+
+  
+  <link rel="stylesheet" href="/assets/stil.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="/assets/tema/portscout.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23176b5b'/><text x='16' y='22' font-size='16' font-family='monospace' fill='white' text-anchor='middle'>HC</text></svg>">
+</head>
+<body>
+<main>
+<article class="yazi">
+  <h1>Kendi Port Scanner'ımı Yazmak: asyncio, Banner Grabbing ve Scope Kontrolü</h1>
+  <p class="lede">Daha önce nmap kullanmıştım; komutu yazar, çıktıyı okurdum. TCP connect scan ve banner grabbing'i kendi kodumla yazınca o çıktıdaki her satırın arkasındaki ağ davranışını görmüş oldum.</p>
+
+  <p class="kunye">
+    <strong>Teknolojiler:</strong> Python · asyncio · FastAPI · SQLAlchemy · argparse · Docker<br>
+    <strong>Kaynak kod:</strong> <a href="https://github.com/hasancrlk/port-tarayici">github.com/hasancrlk/port-tarayici</a>
+  </p>
+
+  <p>PortScout’u nmap’in yerini alması için değil, onun en sık kullanılan kısmını
+anlamak için yazdım: TCP connect scan ve servislerin bağlantı kurulduğunda
+gönderdiği ilk satırın, yani banner’ın okunması. Bu da EMT Cyber stajında verilen
+ödevlerden biriydi.</p>
+
+<p>Bu yazıda iki tasarım kararını anlatıyorum: concurrency için neden <code>asyncio</code>
+seçtiğimi ve aracın kötüye kullanıma karşı kendini nasıl sınırladığını.</p>
+
+<pre>$ python -m cli scan 127.0.0.1 -p top100<br>PORT&nbsp;&nbsp;&nbsp;&nbsp;DURUM&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SERVIS&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;URUN / BANNER<br>22&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;open&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ssh&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;OpenSSH/SSH: OpenSSH_9.6</pre>
+
+<h2 id="neden-threading-değil-asyncio">Neden threading değil, asyncio?</h2>
+
+<p>Port scanning I/O-bound bir iş: her bağlantı ya TCP handshake’i tamamlıyor ya da
+timeout dolana kadar cevap bekliyor. CPU bu sürede neredeyse hiçbir şey yapmıyor.</p>
+
+<p>Kararı belirleyen şey timeout davranışı oldu. Bir thread pool’da
+<code>future.result(timeout=...)</code> beklemeyi bırakır ama thread’i serbest bırakmaz;
+bağlantı OS tarafından kapatılana kadar pool’da bir slot işgal etmeye devam eder.
+Cevap vermeyen (filtered) bir host’ta pool hızla tıkanır. <code>asyncio.wait_for</code> ise
+coroutine’i gerçekten iptal ediyor ve slot hemen boşalıyor.</p>
+
+<p>Concurrency sınırsız da değil. <code>asyncio.Semaphore</code> olmadan binlerce bağlantı aynı
+anda açılmaya çalışır: lokalde <code>too many open files</code> hatasına takılır, karşı
+tarafta ise bir SYN flood’u andırır. Varsayılan değer 200 eşzamanlı bağlantı,
+<code>--concurrency</code> ile değiştirilebiliyor.</p>
+
+<p>Kaba bir ölçüm: cevap vermeyen bir host’ta 1.000 port, 1 saniye timeout ve 200
+concurrency ile tarama yaklaşık 5 saniyede bitiyor. Seri olarak yaklaşık 1.000
+saniye sürerdi.</p>
+
+<h2 id="open-closed-filtered">open, closed, filtered</h2>
+
+<p>Basit scanner’lar “open değilse closed” der; bu bilgi kaybıdır. PortScout her port
+için üç durumdan birini raporluyor:</p>
+
+<ul>
+  <li><strong>open.</strong> Handshake tamamlandı, port dinleniyor.</li>
+  <li><strong>closed.</strong> Karşı taraf <code>RST</code> gönderdi. Host ayakta, ama bu portta servis yok.</li>
+  <li><strong>filtered.</strong> Hiç cevap gelmedi. Arada bir firewall olabilir ya da host kapalı
+olabilir.</li>
+</ul>
+
+<p>Bütün portlar <code>filtered</code> dönerse araç “hepsi kapalı” demek yerine host’a
+ulaşılamadığını belirten bir not ekliyor.</p>
+
+<h2 id="banner-grabbing">Banner grabbing</h2>
+
+<p>SSH, SMTP ve FTP gibi servisler bağlantı kurulur kurulmaz bir banner gönderir;
+okumak yeterlidir. HTTP ise istek bekler, bu yüzden bilinen web portlarına
+yalnızca minimal bir <code>HEAD /</code> gönderiliyor. Okunan banner regex tabanlı bir
+tabloyla ürüne eşleniyor: OpenSSH, Postfix, nginx, Redis gibi. Araç hiçbir koşulda
+exploit denemesi yapmıyor.</p>
+
+<p>Banner terminale yazılmadan önce control karakterlerinden temizleniyor. Ham
+banner’ı doğrudan terminale basmak, ANSI escape sequence gönderen kötü niyetli bir
+sunucunun terminal çıktısını ve log dosyasını değiştirebilmesi anlamına gelir.</p>
+
+<h2 id="scope-kontrolü">Scope kontrolü</h2>
+
+<p>İzinsiz port taraması suç teşkil edebilir. Bu kuralı README’de bir uyarı olarak
+bırakmak yerine koda koydum: <strong>varsayılan config ile internetteki hiçbir hedef
+taranamıyor.</strong> Bir hedefin taranabilmesi için şu koşullardan biri sağlanmalı:</p>
+
+<ul>
+  <li><strong>Allowlist.</strong> Hedefin adı <code>SCAN_ALLOWLIST</code> içinde.</li>
+  <li><strong>Private IP.</strong> Hedef loopback ya da private bir IP adresine çözülüyor.</li>
+  <li><strong>Bilinçli açma.</strong> <code>SCAN_ALLOW_PUBLIC=true</code> ayarı elle açılmış.</li>
+</ul>
+
+<p>Kontrol hem domain adı hem de çözülen IP üzerinden yapılıyor; yalnızca isme
+bakmak, internal bir IP’ye çözülen bir domain ile atlatılabilirdi. Kontrol scan
+engine’in önünde duruyor; CLI ve REST API aynı service katmanından geçtiği için
+API’ye doğrudan <code>curl</code> atan biri de aynı kontrole takılıyor. Kapsam dışı bir hedef
+CLI’da exit code 3, API’de 403 ile reddediliyor.</p>
+
+<h2 id="kapanış">Kapanış</h2>
+
+<p>Bilinçli olarak eklemediğim özellikler var: SYN scan (raw socket ve root yetkisi
+ister), UDP scan, TLS handshake ve nmap’teki <code>-T0</code> gibi IDS evasion amaçlı timing
+profilleri. PortScout bir keşif aracı olarak bilerek “gürültülü” ve sınırlı.</p>
+
+<p>Kendi scanner’ını yazmak, nmap çıktısındaki <code>filtered</code> gibi tek kelimelik bir
+durumun arkasında hangi ağ davranışının yattığını görmenin en doğrudan yolu.
+Proje 38 testle geliyor; sonuçlar SQLite ya da PostgreSQL’e kaydediliyor.</p>
+
+<p><em>Bu araç yalnızca sahibi olduğunuz ya da yazılı test izni verilmiş sistemlerde
+kullanılmalıdır.</em></p>
+
+</article>
+<p>Bu yazının asıl adresi: <a href="https://hasancrlk.github.io/projeler/port-tarayici/">https://hasancrlk.github.io/projeler/port-tarayici/</a></p>
+</main>
+</body>
+</html>
